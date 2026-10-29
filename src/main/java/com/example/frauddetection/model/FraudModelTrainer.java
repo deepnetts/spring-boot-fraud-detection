@@ -3,6 +3,7 @@ package com.example.frauddetection.model;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -83,7 +84,7 @@ public class FraudModelTrainer {
         FraudModel model = new FraudModel(network, provisional);
         EvaluationReport report = evaluate(model, test);
         log.info("Trained in {}s. Test ROC AUC {}, precision {}, recall {} at threshold {}",
-                "%.1f".formatted(seconds), fmt(report.rocAuc()), fmt(report.precision()), fmt(report.recall()), threshold);
+                String.format(Locale.ROOT, "%.1f", seconds), fmt(report.rocAuc()), fmt(report.precision()), fmt(report.recall()), threshold);
 
         return new FraudModel(network, new ModelMetadata(provisional.trainedAt(), provisional.featureNames(), scaler,
                 cfg.hiddenLayers(), trainingSet.size(), provisional.epochs(), seconds, report));
@@ -137,6 +138,6 @@ public class FraudModelTrainer {
     }
 
     private static String fmt(double value) {
-        return "%.4f".formatted(value);
+        return String.format(Locale.ROOT, "%.4f", value);
     }
 }
