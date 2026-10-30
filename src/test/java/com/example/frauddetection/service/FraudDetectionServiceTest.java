@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -17,11 +18,19 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Optional;
+import java.util.concurrent.Callable;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.FutureTask;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
@@ -212,6 +221,182 @@ class FraudDetectionServiceTest {
         assertArrayEquals(before, Files.readAllBytes(file()));
         assertEquals(loadedAt, service.modelInfo().trainedAt());
         assertDoesNotThrow(() -> service.assess(TRANSACTION));
+    }
+
+    @Test
+    @Timeout(60)
+    void scoringInProgressFinishesBeforeARetrainClosesTheOldModel() throws Exception {
+        saveExistingModel();
+        FraudModel served = new ModelRepository(properties(dir, false)).load().orElseThrow();
+        var saved = new CountDownLatch(1);
+        FraudDetectionService service = serving(served, saved);
+        List<FutureTask<FraudAssessment>> scoring = new ArrayList<>();
+        var retrain = new FutureTask<>(() -> service.train(TRAINING, true));
+
+        synchronized (served.network()) {
+            startBlockedScoring(service, scoring);
+            Thread retraining = start(retrain);
+            saved.await();
+            awaitParked(retraining);
+            // the swap has to wait for the scoring above, which is still in progress
+            assertEquals(served.metadata().trainedAt(), service.modelInfo().trainedAt());
+        }
+
+        for (var result : scoring) {
+            assertEquals(served.metadata().trainedAt(), result.get().modelTrainedAt());
+        }
+        Instant retrainedAt = retrain.get().trainedAt();
+        assertNotEquals(served.metadata().trainedAt(), retrainedAt);
+        assertEquals(retrainedAt, service.assess(TRANSACTION).modelTrainedAt());
+    }
+
+    @Test
+    @Timeout(60)
+    void scoringInProgressFinishesBeforeShutdownClosesTheModel() throws Exception {
+        saveExistingModel();
+        FraudModel served = new ModelRepository(properties(dir, false)).load().orElseThrow();
+        FraudDetectionService service = serving(served, new CountDownLatch(1));
+        List<FutureTask<FraudAssessment>> scoring = new ArrayList<>();
+        var stop = new FutureTask<>(() -> {
+            service.shutdown();
+            return null;
+        });
+
+        synchronized (served.network()) {
+            startBlockedScoring(service, scoring);
+            awaitParked(start(stop));
+            // shutdown has to wait for the scoring above, which is still in progress
+            assertEquals(served.metadata().trainedAt(), service.modelInfo().trainedAt());
+        }
+
+        for (var result : scoring) {
+            assertEquals(served.metadata().trainedAt(), result.get().modelTrainedAt());
+        }
+        stop.get();
+        assertThrows(RejectedExecutionException.class, () -> served.predict(TRANSACTION));
+        assertEquals(HttpStatus.SERVICE_UNAVAILABLE, assertThrows(ResponseStatusException.class, service::modelInfo).getStatusCode());
+    }
+
+    @Test
+    @Timeout(120)
+    void scoringKeepsWorkingAcrossRepeatedRetrains() throws Exception {
+        saveExistingModel();
+        FraudDetectionService service = service(false);
+        service.run(null);
+        var stop = new AtomicBoolean();
+        var failure = new AtomicReference<Throwable>();
+        List<Thread> scorers = new ArrayList<>();
+        for (int i = 0; i < 4; i++) {
+            scorers.add(start(() -> {
+                while (!stop.get()) {
+                    try {
+                        service.assess(TRANSACTION);
+                    } catch (Throwable t) {
+                        failure.compareAndSet(null, t);
+                    }
+                }
+            }));
+        }
+
+        for (int i = 0; i < 5; i++) {
+            service.train(TRAINING, true);
+        }
+        stop.set(true);
+        for (Thread scorer : scorers) {
+            scorer.join();
+        }
+
+        assertNull(failure.get());
+    }
+
+    @Test
+    @Timeout(60)
+    void shutdownDuringATrainingRunClosesTheNewModelInsteadOfActivatingIt() throws Exception {
+        saveExistingModel();
+        var built = new AtomicReference<FraudModel>();
+        var trainingDone = new CountDownLatch(1);
+        var mayFinish = new CountDownLatch(1);
+        var trainer = new FraudModelTrainer(properties(dir, false)) {
+            @Override
+            public FraudModel train(Training cfg) {
+                built.set(super.train(cfg));
+                trainingDone.countDown();
+                try {
+                    mayFinish.await();
+                } catch (InterruptedException e) {
+                    throw new IllegalStateException(e);
+                }
+                return built.get();
+            }
+        };
+        var service = new FraudDetectionService(properties(dir, false), trainer, new ModelRepository(properties(dir, false)));
+        services.add(service);
+        service.run(null);
+        var retrain = new FutureTask<>(() -> service.train(TRAINING, true));
+        start(retrain);
+
+        trainingDone.await();
+        service.shutdown();
+        mayFinish.countDown();
+        retrain.get();
+
+        assertEquals(HttpStatus.SERVICE_UNAVAILABLE, assertThrows(ResponseStatusException.class, service::modelInfo).getStatusCode());
+        assertThrows(RejectedExecutionException.class, () -> built.get().predict(TRANSACTION));
+    }
+
+    @Test
+    void aModelLoadedAfterShutdownIsNotActivated() {
+        saveExistingModel();
+        FraudDetectionService service = service(false);
+
+        service.shutdown();
+        service.run(null);
+
+        assertEquals(HttpStatus.SERVICE_UNAVAILABLE, assertThrows(ResponseStatusException.class, service::modelInfo).getStatusCode());
+    }
+
+    /** A service whose model is {@code served}, so a test can block scoring by holding the network's monitor. */
+    private FraudDetectionService serving(FraudModel served, CountDownLatch saved) {
+        FraudProperties properties = properties(dir, false);
+        var service = new FraudDetectionService(properties, countingTrainer(), new ModelRepository(properties) {
+            @Override
+            public Optional<FraudModel> load() {
+                return Optional.of(served);
+            }
+
+            @Override
+            public void save(FraudModel model, boolean overwrite) {
+                super.save(model, overwrite);
+                saved.countDown();
+            }
+        });
+        services.add(service);
+        service.run(null);
+        return service;
+    }
+
+    /** Must be called while holding the served network's monitor, so the scoring threads stop inside predict. */
+    private static void startBlockedScoring(FraudDetectionService service, List<FutureTask<FraudAssessment>> scoring)
+            throws InterruptedException {
+        for (int i = 0; i < 4; i++) {
+            var result = new FutureTask<>((Callable<FraudAssessment>) () -> service.assess(TRANSACTION));
+            scoring.add(result);
+            awaitParked(start(result));
+        }
+    }
+
+    private static Thread start(Runnable task) {
+        var thread = new Thread(task);
+        thread.setDaemon(true);
+        thread.start();
+        return thread;
+    }
+
+    /** Waits until the thread is stopped on a monitor or a lock. */
+    private static void awaitParked(Thread thread) throws InterruptedException {
+        while (thread.getState() != Thread.State.BLOCKED && thread.getState() != Thread.State.WAITING) {
+            Thread.sleep(5);
+        }
     }
 
     private FraudDetectionService service(boolean trainIfMissing) {

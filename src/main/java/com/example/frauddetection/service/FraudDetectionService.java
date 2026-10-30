@@ -3,7 +3,9 @@ package com.example.frauddetection.service;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -32,6 +34,10 @@ public class FraudDetectionService implements ApplicationRunner {
     private final ModelRepository repository;
     private final AtomicReference<FraudModel> model = new AtomicReference<>();
     private final ReentrantLock trainingLock = new ReentrantLock();
+    // scoring holds the read lock, so a model can't be closed while a request is using it;
+    // fair, so a waiting swap can't be starved by constant scoring traffic
+    private final ReadWriteLock modelLock = new ReentrantReadWriteLock(true);
+    private boolean stopped; // guarded by modelLock
 
     public FraudDetectionService(FraudProperties properties, FraudModelTrainer trainer, ModelRepository repository) {
         this.properties = properties;
@@ -46,7 +52,7 @@ public class FraudDetectionService implements ApplicationRunner {
         if (loaded.isPresent()) {
             log.info("Loaded fraud model trained at {} from {}", loaded.get().metadata().trainedAt(),
                     repository.dir().toAbsolutePath());
-            model.set(loaded.get());
+            activate(loaded.get());
         } else if (properties.model().trainIfMissing()) {
             log.info("No fraud model found in {}, training a new one", repository.dir().toAbsolutePath());
             train(properties.training(), false);
@@ -57,9 +63,16 @@ public class FraudDetectionService implements ApplicationRunner {
     }
 
     public FraudAssessment assess(Transaction transaction) {
-        FraudModel current = currentModel();
         double threshold = properties.model().threshold();
-        double probability = current.predict(transaction);
+        FraudModel current;
+        double probability;
+        modelLock.readLock().lock();
+        try {
+            current = currentModel();
+            probability = current.predict(transaction);
+        } finally {
+            modelLock.readLock().unlock();
+        }
         return new FraudAssessment(
                 transaction.transactionId(),
                 probability,
@@ -103,7 +116,7 @@ public class FraudDetectionService implements ApplicationRunner {
                 log.warn("Replaced the fraud model in {}; the previous model was not kept",
                         repository.dir().toAbsolutePath());
             }
-            closeQuietly(model.getAndSet(trained));
+            activate(trained);
             return ModelInfo.of(trained.metadata(), properties.model().threshold());
         } finally {
             trainingLock.unlock();
@@ -118,9 +131,30 @@ public class FraudDetectionService implements ApplicationRunner {
         return current;
     }
 
+    /** Waits for scoring in progress, so the model that gets closed can't still be in use. */
+    private void activate(FraudModel next) {
+        FraudModel retired;
+        modelLock.writeLock().lock();
+        try {
+            // nothing would ever close a model activated after shutdown
+            retired = stopped ? next : model.getAndSet(next);
+        } finally {
+            modelLock.writeLock().unlock();
+        }
+        closeQuietly(retired);
+    }
+
     @PreDestroy
     void shutdown() {
-        closeQuietly(model.getAndSet(null));
+        FraudModel retired;
+        modelLock.writeLock().lock();
+        try {
+            stopped = true;
+            retired = model.getAndSet(null);
+        } finally {
+            modelLock.writeLock().unlock();
+        }
+        closeQuietly(retired);
     }
 
     private static void closeQuietly(FraudModel model) {
