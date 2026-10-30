@@ -43,7 +43,8 @@ That gives 27 inputs, z-score standardized. The scaler is fitted on the training
   To train on real data, replace it with a loader that returns `List<LabeledTransaction>` and call
   `FraudModelTrainer.train(data, cfg)`.
 
-With the default settings the held-out results are ROC AUC ≈ 0.98 and precision ≈ recall ≈ 0.84 at threshold 0.5.
+**Provisional results.** With the default settings the held-out results are ROC AUC ≈ 0.98 and precision ≈ recall ≈ 0.84 at threshold 0.5.
+Treat these as a demonstration only: the current synthetic data contains patterns that make fraud too easy to detect, and they say nothing about real-world performance. See the [data contract](docs/DATA_CONTRACT.md).
 
 ## API
 
@@ -82,6 +83,7 @@ curl -X POST localhost:8080/api/transactions/assess -H "Content-Type: applicatio
 
 `riskIndicators` are rule-based red flags meant to help analysts. They do not explain the network's score.
 All fields are required. A request that leaves one out, or has a value out of range, gets a `400` response.
+This strict input is a demonstration limitation, not a recommended production design: unknown values cannot be sent, and a `400` means the transaction was not scored, never that it was approved. See the [data contract](docs/DATA_CONTRACT.md).
 
 ## Configuration (`application.yml`)
 
