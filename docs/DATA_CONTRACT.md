@@ -21,7 +21,8 @@ that the code already computes it.
 | 27 model features and z-score standardization | Implemented |
 | Rejecting a saved model trained with different feature names | Implemented. Startup stops with a clear message and the file is left unchanged |
 | Field definitions in [section 2.2](#22-definitions-contract-and-current-synthetic-behavior) | Contract requirement. Not computed or verified by the application |
-| Synthetic generator that follows the contract | Planned ([section 8](#8-synthetic-data)) |
+| Synthetic generator rules | Implemented ([section 8](#8-synthetic-data)) |
+| Validation split, PR AUC and recommended threshold | Implemented ([section 10](#10-evaluation-and-fraud-scores)) |
 | CSV training data | Planned ([section 7](#7-csv-training-format-planned)) |
 | `timestamp` and `customerId` metadata columns | Planned |
 | Time-based or customer-based evaluation | Not in the MVP |
@@ -77,19 +78,19 @@ middle column exist in the synthetic data.
 |---|---|---|
 | `amount` | Amount in the deployment's single currency | Sampled as customer average × category factor × random factor. No currency concept |
 | `customerAvgAmount` | Same currency. Mean over the prior 90 days, excluding this transaction and known fraud | Sampled directly from a log-normal distribution. No history and no 90-day window |
-| `hourOfDay` | Hour in the cardholder's home time zone | Sampled directly. Legitimate traffic centers on 14:00, fraud is weighted toward night. No time zones |
+| `hourOfDay` | Hour in the cardholder's home time zone | Sampled directly. Legitimate and stealthy traffic center on 14:00, other fraud is weighted toward night. No time zones |
 | `merchantCategory` | Real merchant code mapped to one of the 10 values | Sampled from weighted lists |
 | `distanceFromHomeKm` | Distance between the cardholder's home and the transaction location, from a named location source | Sampled directly. No locations. Online transactions get values as if a location were known |
 | `distanceFromLastTransactionKm` | Distance between the previous transaction and this one | Sampled directly. No previous transaction exists |
-| `minutesSinceLastTransaction` | Minutes since the previous transaction on the card | Sampled independently of `transactionsLast24h`, so the two can contradict each other |
+| `minutesSinceLastTransaction` | Minutes since the previous transaction on the card | Sampled so it agrees with `transactionsLast24h`: under 1,440 exactly when the count is at least 1 |
 | `transactionsLast24h` | Transactions on the card in the 24 hours before this one, excluding this one | Sampled from a Poisson distribution, not counted |
 | `failedAttemptsLast24h` | Declined or failed attempts in the 24 hours before this one, excluding this one | Sampled from a Poisson distribution, not counted |
-| `accountAgeDays` | Days since the account was opened, not since the card was issued | Sampled directly. Legitimate values are 30–3,629. No account or card distinction |
+| `accountAgeDays` | Days since the account was opened, not since the card was issued | Sampled directly, 1–3,650 days, so new accounts occur in legitimate traffic. No account or card distinction |
 | `cardNotPresent` | `true` for online, phone or mail order | Sampled, with a higher chance for digital goods |
-| `usedChip` | EMV chip was read, including contactless | Sampled. No contactless concept |
+| `usedChip` | EMV chip was read, including contactless | Sampled, only for card-present payments. No contactless concept |
 | `usedPin` | PIN was verified | Sampled, and only when `usedChip` is `true` |
 | `foreignTransaction` | Merchant country differs from the card's issuing country | Sampled. No countries |
-| `newDevice` | Device or browser fingerprint never seen for this customer | Sampled. No devices |
+| `newDevice` | Device or browser fingerprint never seen for this customer | Sampled, only for card-not-present payments. No devices |
 | `newMerchant` | Customer never transacted with this merchant before | Sampled. No customers or merchants |
 
 `amount` and `customerAvgAmount` assume one currency per deployment. There is no currency field.
@@ -237,33 +238,23 @@ data.
 imbalanced data (3% fraud by default) from legitimate traffic and four fraud patterns: stolen card, card
 testing, account takeover and stealthy.
 
-**Known problems in the current generator:**
-
-- Some field combinations appear only in fraud rows: an account under 30 days old, a chip read on a
-  card-not-present transaction, and a new device on a card-present transaction.
-- Fields are sampled independently, so some legitimate rows contradict themselves. For example, the last
-  transaction can be over 24 hours ago while `transactionsLast24h` is 2 or more.
-- Stealthy fraud replaces the normal hour distribution, so it is far more night-weighted than legitimate
-  traffic.
-- Card testing rows always have at least 8 transactions and 2 failed attempts.
-- Account takeover includes newly opened accounts, although a takeover targets an established account.
-- There is no label noise, change over time, or label delay.
-
-**Performance numbers are provisional.** Results from this generator show that the pipeline works. They
-are not evidence of real-world performance, and they will still be a synthetic demonstration after the
-generator is corrected.
-
-**Planned generator rules:**
+**Generator rules (Implemented, enforced by `SyntheticTransactionGeneratorTest`):**
 
 1. `usedChip` requires card-present, `usedPin` requires `usedChip`, and `newDevice` requires
    card-not-present.
 2. `minutesSinceLastTransaction` is under 1,440 exactly when `transactionsLast24h` is at least 1.
-3. Legitimate accounts can be new, so an account under 30 days old no longer identifies fraud.
+3. Legitimate accounts can be new, so an account under 30 days old doesn't identify fraud.
 4. Account takeover uses established accounts only.
-5. Stealthy fraud keeps a normal hour distribution and changes only one or two weak signals.
-6. Card testing is no longer perfectly clean.
+5. Stealthy fraud keeps a normal hour distribution and changes exactly one or two weak signals that can
+   change on that row.
+6. Card testing isn't perfectly clean: velocity, failed attempts and amounts can all look ordinary.
 
-The fraud rate stays realistically imbalanced. There is no balanced-dataset example.
+**Remaining simplifications:** rows are independent, with no customers or timeline, and there is no label
+noise, change over time, or label delay. The generator was corrected to remove contradictions and giveaways,
+not to reach a particular score.
+
+The data stays imbalanced, and there is no balanced-dataset example. Results from this generator show that
+the pipeline works. They are not evidence of real-world performance.
 
 ## 9. Customizing features
 
@@ -283,3 +274,135 @@ trained with different names is rejected. Startup stops with a message naming th
 and the file is left unchanged. The application never retrains over it, renames it or deletes it. To
 continue, move `fraud-model.bin` out of `fraud.model.dir`, or point `fraud.model.dir` at an empty folder.
 With `fraud.model.train-if-missing: true` the next start trains a new model.
+
+## 10. Evaluation and fraud scores
+
+**Implemented** in `FraudModelTrainer` and `ModelEvaluator`.
+
+### Data splits
+
+The data is shuffled with a fixed seed, then split by class into 60% training, 15% validation and 25% test,
+so each part has the same fraud rate.
+
+| Split | Used for |
+|---|---|
+| Training | Fitting the network and the scaler |
+| Validation | Choosing the recommended threshold |
+| Test | Final metrics only |
+
+A seeded random split suits this synthetic data, where rows are independent. **Real chronological
+transactions may need a time-based or customer-aware evaluation strategy**, because a random split lets the
+model train on later transactions and see the same customers in training and test.
+
+### Fraud scores are not probabilities
+
+`fraudScore` is a value in [0, 1] for ranking transactions and comparing them with a threshold. It is not a
+calibrated probability: a score of 0.8 does not mean an 80% chance of fraud. The project does no probability
+calibration.
+
+### Thresholds
+
+There are two different thresholds, and neither is universally optimal:
+
+| Threshold | Value | What it is |
+|---|---|---|
+| Decision threshold, `fraud.model.threshold` | 0.5 by default | Decides what gets flagged. A simple default, not a tuned value |
+| Recommended threshold, `recommendedThreshold` | 0.73 for the default model | The best F1 on validation data. Reported only, never applied automatically |
+
+The recommended threshold varied noticeably between runs, and F1 treats missed fraud and false alarms as equally
+costly, which is rarely true. Use it as a starting point. A real threshold depends on business costs: what missed
+fraud costs against what false alarms and reviews cost.
+
+### Why a 3% fraud rate
+
+3% is a demonstration choice, not a realistic rate: real card fraud is usually well under 1%. It gives enough
+fraud examples to train and evaluate in about a minute, and it is still imbalanced enough that always answering
+"legitimate" would be 97% accurate.
+
+**Precision and PR AUC only hold at the fraud rate they were measured at.** With the recall and false-positive
+rate below, precision of 0.91 at a 3% fraud rate would be about 0.40 at a 0.2% fraud rate, with the same model.
+
+### Why no oversampling by default
+
+Oversampling duplicates fraud rows in the training split only. The default was chosen by the highest mean PR AUC
+on validation data, with models trained on development seeds and compared on a separately generated validation
+set of 6,000 rows. The test split below played no part.
+
+| `target-fraud-share` | Mean ROC AUC | Mean PR AUC | Precision at 0.5 | Recall at 0.5 |
+|---|---|---|---|---|
+| 0 (natural 3%) | 0.934 | 0.828 | 0.91–0.94 | 0.72–0.76 |
+| 0.10 | 0.926 | 0.812 | 0.74–0.87 | 0.76–0.78 |
+| 0.30 | 0.931 | 0.808 | 0.69–0.77 | 0.76–0.82 |
+
+Three seeds per setting, 12,000 samples. No oversampling had the best PR AUC on every seed. Oversampling gave
+slightly higher recall at a fixed threshold of 0.5, but lower precision. The setting remains available because
+results can differ on real data.
+
+### Results
+
+Default settings, seed 42, threshold 0.5, measured once on the final generator after every setting was fixed:
+
+| Test rows | Fraud cases | ROC AUC | PR AUC | Precision | Recall | False-positive rate |
+|---|---|---|---|---|---|---|
+| 3,000 | 90 | 0.939 | 0.796 | 0.91 | 0.68 | 0.21% |
+
+That is 61 fraud cases caught, 29 missed and 6 false alarms. The recommended threshold from validation data was
+0.73, which gave precision 0.98 and recall 0.67 on the test split.
+
+Recall by fraud pattern, measured on separately generated data:
+
+| Pattern | Flagged at 0.5 |
+|---|---|
+| Card testing | 95% |
+| Account takeover | 90% |
+| Stolen card | 82% |
+| Stealthy | 2% |
+| Legitimate traffic (false alarms) | 0.13% |
+
+How to read these numbers:
+
+- **The test set is small.** 90 fraud cases make these numbers approximate. On a larger fresh sample, ROC AUC was
+  0.93.
+- **This is not an independent validation.** The test data comes from the same generator the project was built
+  around. An earlier generator version, with a bug that left some stealthy rows unchanged, was measured once with
+  the same seed (ROC AUC 0.949, recall 0.77). Those numbers are superseded and not comparable. The bug was fixed
+  because it broke rule 5, not to change a score.
+- **The fraud mix is an assumption.** Stealthy fraud is set to 20% of fraud, which effectively caps overall recall
+  near 80%. Quote recall by pattern, not only the overall number.
+- **A simple baseline comes close.** Counting the rule-based red flags reached ROC AUC 0.92 on the same fresh
+  sample, against 0.93 for the network. On this data the network's advantage is modest.
+
+### Stealthy fraud
+
+Stealthy rows are legitimate transactions with exactly one or two weak signals changed: a higher amount, a riskier
+category, a new device, a new merchant, or slightly more velocity. Being caught only about 2% of the time is the
+expected result of overlapping data, not a fault in training, features or evaluation.
+
+- **The signals are weak.** The strongest single feature, `new_merchant`, reaches AUC 0.65 against legitimate rows,
+  and every signal also occurs in normal traffic.
+- **The model does react.** Adding one signal to a legitimate row raises its mean score about two to four times,
+  but rarely past the threshold. Its ROC AUC for stealthy against legitimate rows is 0.70.
+- **More data does not fix it.** Four times the data gave ROC AUC 0.68 for the same comparison.
+- **A dedicated model does not fix it.** A network trained only on stealthy and legitimate rows, on 50/50 data as a
+  diagnostic, reached ROC AUC 0.82. Its most confident flags would still be only about 15% precise at real traffic
+  proportions, because stealthy fraud is just 0.6% of transactions.
+
+Catching this fraud takes information these features do not contain, such as a customer's full history, links
+between merchants and devices, or confirmed outcomes.
+
+### Threshold trade-off
+
+Lowering the threshold finds more fraud at a rising cost. At the 3% mix, per 10,000 transactions, on fresh data:
+
+| Threshold | Stealthy recall | Overall recall | False positives | Precision | Alerts | Fraud found |
+|---|---|---|---|---|---|---|
+| 0.5 | 1.9% | 70.1% | 0.11% | 0.95 | 221 | 210 |
+| 0.2 | 4.3% | 74.0% | 0.40% | 0.85 | 260 | 222 |
+| 0.1 | 6.9% | 76.1% | 0.85% | 0.74 | 311 | 228 |
+| 0.02 | 17.9% | 80.7% | 3.55% | 0.41 | 587 | 242 |
+| 0.005 | 33.2% | 84.9% | 10.34% | 0.20 | 1,258 | 255 |
+| 0.002 | 46.2% | 88.0% | 17.99% | 0.13 | 2,009 | 264 |
+
+Going from 0.5 to 0.02 costs about 10 false alarms for each extra fraud found, and going from 0.02 to 0.005 costs
+about 50. These costs would be much higher at real fraud rates. No threshold makes stealthy fraud practical to
+catch. Choosing one is a business decision, so the default stays at 0.5.

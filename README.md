@@ -4,7 +4,7 @@ A REST service that scores card transactions for fraud with a feed-forward neura
 trained using [Deep Netts](https://www.deepnetts.com) (`com.deepnetts:deepnetts-core`).
 
 - Java 25, Spring Boot 4.0, Deep Netts 4.0.4
-- On first start it trains a model on synthetic transactions (about 1–2 minutes), saves it to `./model`,
+- On first start it trains a model on synthetic transactions (about 1 minute), saves it to `./model`,
   and loads it on later starts.
 
 ## Run
@@ -34,17 +34,28 @@ That gives 27 inputs, z-score standardized. The scaler is fitted on the training
 ## Model
 
 - Network: 27 inputs → 32 ReLU → 16 ReLU → 1 sigmoid, binary cross-entropy loss, Adam, L2 regularization
-- Class imbalance: in the training split, fraud examples are oversampled up to 30%. The test split keeps the
-  natural fraud rate (3%), so the reported precision and recall reflect production conditions.
-- Evaluation: ROC AUC, precision, recall, F1, false-positive rate, confusion matrix, and the
-  threshold that gives the best F1
+- Data split: 60% training, 15% validation, 25% test, all at the natural fraud rate (3%). A seeded random
+  split suits this synthetic data. Real chronological transactions may need a time-based or customer-aware split.
+- Class imbalance: the model trains at the natural fraud rate. Oversampling is available with
+  `fraud.training.target-fraud-share`, but it gave worse validation results, so it is off by default.
+- Evaluation: ROC AUC, PR AUC, precision, recall, F1, false-positive rate and confusion matrix, all on the test
+  split. Transactions are flagged at `fraud.model.threshold`, 0.5 by default. A recommended threshold (best F1, 0.73
+  for the default model) is chosen on the validation split and reported, never applied automatically. Neither is
+  universally optimal: the right threshold depends on business costs.
+- Fraud scores: `fraudScore` is for ranking transactions and comparing them with a threshold. It is **not a
+  calibrated probability**.
 - Synthetic data: `SyntheticTransactionGenerator` mixes legitimate traffic with four fraud patterns:
   stolen card, card testing, account takeover, and a "stealthy" pattern with only weak signals.
   To train on real data, replace it with a loader that returns `List<LabeledTransaction>` and call
   `FraudModelTrainer.train(data, cfg)`.
 
-**Provisional results.** With the default settings the held-out results are ROC AUC ≈ 0.98 and precision ≈ recall ≈ 0.84 at threshold 0.5.
-Treat these as a demonstration only: the current synthetic data contains patterns that make fraud too easy to detect, and they say nothing about real-world performance. See the [data contract](docs/DATA_CONTRACT.md).
+**Results on synthetic data** with the default settings, at threshold 0.5, on 3,000 test transactions containing 90 fraud cases:
+
+| ROC AUC | PR AUC | Precision | Recall | False-positive rate | Fraud caught | Fraud missed | False alarms |
+|---|---|---|---|---|---|---|---|
+| 0.939 | 0.796 | 0.91 | 0.68 | 0.21% | 61 | 29 | 6 |
+
+These numbers show the pipeline working. They are not evidence of real-world performance, and with only 90 fraud cases they are approximate: a larger fresh sample gave ROC AUC 0.93. They come from the same synthetic generator, so they are not an independent validation. The model catches most stolen-card, card-testing and account-takeover fraud, and almost none of the stealthy pattern, by design. See the [data contract](docs/DATA_CONTRACT.md#10-evaluation-and-fraud-scores) for the method and details.
 
 ## API
 
@@ -72,7 +83,7 @@ curl -X POST localhost:8080/api/transactions/assess -H "Content-Type: applicatio
 ```json
 {
   "transactionId": "tx-1001",
-  "fraudProbability": 0.9999,
+  "fraudScore": 1.0,
   "fraud": true,
   "riskLevel": "CRITICAL",
   "threshold": 0.5,
@@ -91,8 +102,8 @@ This strict input is a demonstration limitation, not a recommended production de
 |---|---|---|
 | `fraud.model.dir` | `./model` | Where the trained model (`fraud-model.bin`: weights, scaler, metrics) is stored |
 | `fraud.model.train-if-missing` | `true` | Train on startup when no model exists |
-| `fraud.model.threshold` | `0.5` | Probability at or above which a transaction is flagged |
-| `fraud.training.*` | | Number of samples, fraud rate, test fraction, oversampling target, hidden layers, epochs, learning rate, L2, seed |
+| `fraud.model.threshold` | `0.5` | Fraud score at or above which a transaction is flagged |
+| `fraud.training.*` | | Number of samples, fraud rate, test and validation fractions, oversampling target (`0` means none), hidden layers, epochs, learning rate, L2, seed |
 
 To retrain after changing training settings, call `POST /api/model/train` with `{"overwrite":true}`, or move the model out of `./model` and restart.
 
@@ -101,5 +112,6 @@ To retrain after changing training settings, call `POST /api/model/train` with `
 - **Missing:** the first start trains and saves a model when `fraud.model.train-if-missing` is `true`. Otherwise the application starts and scoring returns `503` until a model is trained.
 - **Incompatible or unreadable:** startup stops with a message explaining what is wrong and what to do. The file is never changed, moved or retrained over.
 - **Replacing a model:** only `POST /api/model/train` with `{"overwrite":true}` replaces one, and the previous model is **not kept**. There is no backup. If training or saving fails, the existing model stays in place and keeps serving.
+- **Shutdown during a retrain (PoC limitation):** shutdown does not cancel a retrain. It either finishes and saves a complete model, which is not activated until the next start, or is lost if the JVM halts first. The saved model is never left partly written.
 
 Replacement is atomic: if the filesystem cannot swap the file atomically, the save fails and the existing model is kept. Run one application instance per model folder.

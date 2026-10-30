@@ -28,6 +28,9 @@ public class SyntheticTransactionGenerator {
     private static final double[] LEGIT_CATEGORY_WEIGHTS = {25, 15, 12, 18, 5, 4, 8, 8, 2, 3};
     private static final double[] FRAUD_CATEGORY_WEIGHTS = {4, 3, 3, 10, 20, 10, 20, 5, 10, 15};
     private static final double[] CATEGORY_AMOUNT_FACTOR = {1.0, 0.7, 0.9, 1.3, 4.0, 5.0, 0.5, 0.8, 1.5, 3.0};
+    private static final double MINUTES_PER_DAY = 1440;
+
+    private enum WeakSignal { AMOUNT, CATEGORY, NEW_DEVICE, NEW_MERCHANT, VELOCITY }
 
     private final Random random;
 
@@ -55,6 +58,7 @@ public class SyntheticTransactionGenerator {
         double distanceHome = travelling ? 200 + random.nextDouble() * 3000 : exponential(8);
         boolean cardNotPresent = chance(category == MerchantCategory.DIGITAL_GOODS ? 0.9 : 0.2);
         boolean chip = !cardNotPresent && chance(0.92);
+        int transactions = poisson(3);
         return new Transaction(
                 id(),
                 round2(amount),
@@ -63,10 +67,10 @@ public class SyntheticTransactionGenerator {
                 category,
                 round2(distanceHome),
                 round2(travelling && chance(0.3) ? distanceHome : exponential(5)),
-                round2(exponential(600)),
-                poisson(3),
+                minutesSinceLast(transactions, 600),
+                transactions,
                 poisson(0.1),
-                30 + random.nextInt(3600),
+                accountAge(),
                 cardNotPresent,
                 chip,
                 chip && chance(0.6),
@@ -87,55 +91,108 @@ public class SyntheticTransactionGenerator {
         return stealthy();
     }
 
-    private Transaction stolenCard() {
+    Transaction stolenCard() {
         MerchantCategory category = pick(FRAUD_CATEGORY_WEIGHTS);
         double customerAvg = logNormal(Math.log(60), 0.6);
         double amount = customerAvg * CATEGORY_AMOUNT_FACTOR[category.ordinal()] * logNormal(Math.log(4), 0.7);
         boolean cardNotPresent = chance(0.5);
         boolean chip = !cardNotPresent && chance(0.4);
         double distanceHome = chance(0.6) ? logNormal(Math.log(300), 1.0) : exponential(20);
+        int transactions = poisson(7);
         return new Transaction(
                 id(), round2(amount), round2(customerAvg), nightOrAnyHour(0.45), category,
                 round2(distanceHome), round2(chance(0.6) ? logNormal(Math.log(150), 1.0) : exponential(10)),
-                round2(exponential(60)), poisson(7), poisson(0.8), 30 + random.nextInt(3600),
+                minutesSinceLast(transactions, 60), transactions, poisson(0.8), accountAge(),
                 cardNotPresent, chip, chip && chance(0.1), chance(0.35),
                 cardNotPresent && chance(0.4), chance(0.7));
     }
 
-    private Transaction cardTesting() {
+    Transaction cardTesting() {
         double customerAvg = logNormal(Math.log(60), 0.6);
         MerchantCategory category = chance(0.6) ? MerchantCategory.DIGITAL_GOODS : pick(FRAUD_CATEGORY_WEIGHTS);
+        int transactions = poisson(10);
         return new Transaction(
-                id(), round2(0.5 + random.nextDouble() * 4.5), round2(customerAvg), nightOrAnyHour(0.4), category,
+                id(), round2(0.5 + random.nextDouble() * 9.5), round2(customerAvg), nightOrAnyHour(0.4), category,
                 round2(exponential(40)), round2(exponential(30)),
-                round2(exponential(4)), 8 + poisson(10), 2 + poisson(3), 30 + random.nextInt(3600),
+                minutesSinceLast(transactions, 4), transactions, poisson(2.5), accountAge(),
                 true, false, false, chance(0.4), chance(0.7), chance(0.8));
     }
 
-    private Transaction accountTakeover() {
+    Transaction accountTakeover() {
         MerchantCategory category = chance(0.5) ? MerchantCategory.MONEY_TRANSFER : pick(FRAUD_CATEGORY_WEIGHTS);
         double customerAvg = logNormal(Math.log(60), 0.6);
         double amount = customerAvg * CATEGORY_AMOUNT_FACTOR[category.ordinal()] * logNormal(Math.log(3), 0.8);
+        int transactions = poisson(5);
         return new Transaction(
                 id(), round2(amount), round2(customerAvg), nightOrAnyHour(0.3), category,
                 round2(exponential(30)), round2(exponential(25)),
-                round2(exponential(120)), poisson(5), poisson(1.5),
-                chance(0.4) ? 1 + random.nextInt(60) : 30 + random.nextInt(3600),
+                minutesSinceLast(transactions, 120), transactions, poisson(1.5),
+                180 + random.nextInt(3470),
                 true, false, false, chance(0.2), chance(0.8), chance(0.75));
     }
 
-    private Transaction stealthy() {
-        // starts from a normal-looking transaction and flips a couple of weak signals
-        Transaction t = legitimate();
-        double amount = t.amount() * logNormal(Math.log(1.8), 0.5);
+    Transaction stealthy() {
+        return stealthy(legitimate());
+    }
+
+    /** Starts from a normal transaction and changes one or two weak signals that can change on this row. */
+    Transaction stealthy(Transaction t) {
+        double amount = t.amount();
+        MerchantCategory category = t.merchantCategory();
+        double minutes = t.minutesSinceLastTransaction();
+        int transactions = t.transactionsLast24h();
+        boolean newDevice = t.newDevice();
+        boolean newMerchant = t.newMerchant();
+        List<WeakSignal> signals = new ArrayList<>(List.of(WeakSignal.AMOUNT, WeakSignal.CATEGORY, WeakSignal.VELOCITY));
+        if (t.cardNotPresent() && !t.newDevice()) {
+            signals.add(WeakSignal.NEW_DEVICE);
+        }
+        if (!t.newMerchant()) {
+            signals.add(WeakSignal.NEW_MERCHANT);
+        }
+        Collections.shuffle(signals, random);
+        for (WeakSignal signal : signals.subList(0, 1 + random.nextInt(2))) {
+            switch (signal) {
+                case AMOUNT -> {
+                    do {
+                        amount = round2(t.amount() * logNormal(Math.log(1.8), 0.5));
+                    } while (amount == t.amount());
+                }
+                case CATEGORY -> {
+                    do {
+                        category = pick(FRAUD_CATEGORY_WEIGHTS);
+                    } while (category == t.merchantCategory());
+                }
+                case NEW_DEVICE -> newDevice = true;
+                case NEW_MERCHANT -> newMerchant = true;
+                case VELOCITY -> {
+                    transactions += 1 + poisson(1);
+                    minutes = minutesSinceLast(transactions, 120);
+                }
+            }
+        }
         return new Transaction(
-                t.transactionId(), round2(amount), t.customerAvgAmount(), nightOrAnyHour(0.2),
-                chance(0.5) ? pick(FRAUD_CATEGORY_WEIGHTS) : t.merchantCategory(),
-                round2(t.distanceFromHomeKm() * (chance(0.3) ? 5 : 1)), t.distanceFromLastTransactionKm(),
-                round2(t.minutesSinceLastTransaction() / 3), t.transactionsLast24h() + poisson(1),
-                t.failedAttemptsLast24h() + poisson(0.3), t.accountAgeDays(),
-                t.cardNotPresent() || chance(0.4), t.usedChip(), t.usedPin() && chance(0.5),
-                t.foreignTransaction() || chance(0.1), t.newDevice() || chance(0.25), t.newMerchant() || chance(0.4));
+                t.transactionId(), amount, t.customerAvgAmount(), t.hourOfDay(), category,
+                t.distanceFromHomeKm(), t.distanceFromLastTransactionKm(), minutes, transactions,
+                t.failedAttemptsLast24h(), t.accountAgeDays(), t.cardNotPresent(), t.usedChip(), t.usedPin(),
+                t.foreignTransaction(), newDevice, newMerchant);
+    }
+
+    /** New accounts are rare, but they are not a sign of fraud on their own. */
+    private int accountAge() {
+        return 1 + random.nextInt(3650);
+    }
+
+    /** Agrees with the 24-hour count, which excludes the current transaction. */
+    private double minutesSinceLast(int transactionsLast24h, double meanMinutes) {
+        if (transactionsLast24h == 0) {
+            return round2(MINUTES_PER_DAY + exponential(meanMinutes));
+        }
+        double minutes;
+        do {
+            minutes = exponential(meanMinutes);
+        } while (minutes >= MINUTES_PER_DAY);
+        return Math.min(round2(minutes), MINUTES_PER_DAY - 0.01);
     }
 
     private int nightOrAnyHour(double nightProbability) {
