@@ -54,7 +54,7 @@ Treat these as a demonstration only: the current synthetic data contains pattern
 | POST | `/api/transactions/assess/batch` | Score up to 1000 transactions |
 | GET | `/api/transactions/sample?fraud=true` | Generate an example transaction |
 | GET | `/api/model` | Model info and evaluation metrics |
-| POST | `/api/model/train` | Retrain; optional body `{"samples":50000,"fraudRate":0.02,"maxEpochs":20,"seed":7}` |
+| POST | `/api/model/train` | Train a model; optional body `{"samples":50000,"fraudRate":0.02,"maxEpochs":20,"seed":7,"overwrite":true}`. Returns `409` if a model already exists and `overwrite` is not `true` |
 
 ```bash
 curl -X POST localhost:8080/api/transactions/assess -H "Content-Type: application/json" -d '{
@@ -94,4 +94,12 @@ This strict input is a demonstration limitation, not a recommended production de
 | `fraud.model.threshold` | `0.5` | Probability at or above which a transaction is flagged |
 | `fraud.training.*` | | Number of samples, fraud rate, test fraction, oversampling target, hidden layers, epochs, learning rate, L2, seed |
 
-Delete `./model` (or call `POST /api/model/train`) to retrain after changing training settings.
+To retrain after changing training settings, call `POST /api/model/train` with `{"overwrite":true}`, or move the model out of `./model` and restart.
+
+## Saved models
+
+- **Missing:** the first start trains and saves a model when `fraud.model.train-if-missing` is `true`. Otherwise the application starts and scoring returns `503` until a model is trained.
+- **Incompatible or unreadable:** startup stops with a message explaining what is wrong and what to do. The file is never changed, moved or retrained over.
+- **Replacing a model:** only `POST /api/model/train` with `{"overwrite":true}` replaces one, and the previous model is **not kept**. There is no backup. If training or saving fails, the existing model stays in place and keeps serving.
+
+Replacement is atomic: if the filesystem cannot swap the file atomically, the save fails and the existing model is kept. Run one application instance per model folder.

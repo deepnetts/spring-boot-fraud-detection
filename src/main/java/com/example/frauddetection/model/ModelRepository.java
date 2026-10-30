@@ -1,18 +1,29 @@
 package com.example.frauddetection.model;
 
 import java.io.IOException;
+import java.io.InvalidClassException;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.io.Serializable;
+import java.io.StreamCorruptedException;
 import java.io.UncheckedIOException;
+import java.nio.channels.Channels;
+import java.nio.channels.FileChannel;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.nio.file.StandardOpenOption;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import com.example.frauddetection.config.FraudProperties;
+import com.example.frauddetection.features.FeatureExtractor;
+import com.example.frauddetection.model.ModelLoadException.Reason;
 
 import deepnetts.net.FeedForwardNetwork;
 
@@ -26,43 +37,115 @@ public class ModelRepository {
 
     static final String MODEL_FILE = "fraud-model.bin";
 
+    private static final Logger log = LoggerFactory.getLogger(ModelRepository.class);
+
     private final Path dir;
+    private final Path file;
 
     public ModelRepository(FraudProperties properties) {
         this.dir = properties.model().dir();
+        this.file = dir.resolve(MODEL_FILE);
     }
 
-    public void save(FraudModel model) {
+    /** True unless the model is confirmed missing, so a file that can't be checked is never replaced. */
+    public boolean exists() {
+        return !Files.notExists(file);
+    }
+
+    /**
+     * Saves the model, leaving any existing model untouched unless the new one is complete and
+     * {@code overwrite} is set. The new file is only swapped in after it is on disk and reads back.
+     */
+    public void save(FraudModel model, boolean overwrite) {
+        Path tmp = null;
+        boolean moved = false;
         try {
             Files.createDirectories(dir);
-            // write to a temp file first so a crash never leaves a half-written model behind
-            Path tmp = dir.resolve(MODEL_FILE + ".tmp");
-            try (var out = new ObjectOutputStream(Files.newOutputStream(tmp))) {
-                out.writeObject(new SavedModel(model.metadata(), NetworkParameters.capture(model.network())));
+            // a unique name, so this file can't be shared with a concurrent save
+            tmp = Files.createTempFile(dir, MODEL_FILE + ".", ".tmp");
+            write(model, tmp);
+            checkFeatures(read(tmp), tmp);
+            if (overwrite) {
+                // never fall back to REPLACE_EXISTING: it isn't atomic and could lose the existing model
+                Files.move(tmp, file, StandardCopyOption.ATOMIC_MOVE);
+            } else {
+                Files.move(tmp, file);
             }
-            Files.move(tmp, dir.resolve(MODEL_FILE), StandardCopyOption.REPLACE_EXISTING);
+            moved = true;
         } catch (IOException e) {
             throw new UncheckedIOException("Could not save model to " + dir.toAbsolutePath(), e);
+        } finally {
+            if (tmp != null && !moved) {
+                deleteTemporaryFile(tmp);
+            }
         }
     }
 
     public Optional<FraudModel> load() {
-        Path file = dir.resolve(MODEL_FILE);
-        if (!Files.exists(file)) {
+        if (Files.notExists(file)) {
             return Optional.empty();
         }
-        try (var in = new ObjectInputStream(Files.newInputStream(file))) {
-            SavedModel saved = (SavedModel) in.readObject();
+        SavedModel saved = read(file);
+        checkFeatures(saved, file);
+        try {
             FeedForwardNetwork network = FraudModelTrainer.buildNetwork(saved.metadata().hiddenLayers(), 0);
             saved.parameters().restoreInto(network);
             return Optional.of(new FraudModel(network, saved.metadata()));
-        } catch (IOException | ClassNotFoundException e) {
-            throw new IllegalStateException("Could not load model from " + file.toAbsolutePath(), e);
+        } catch (RuntimeException e) {
+            throw new ModelLoadException(Reason.INCOMPATIBLE, file, "its parameters don't fit the network: " + e, e);
         }
     }
 
     public Path dir() {
         return dir;
+    }
+
+    private static void write(FraudModel model, Path tmp) throws IOException {
+        try (FileChannel channel = FileChannel.open(tmp, StandardOpenOption.WRITE);
+                var out = new ObjectOutputStream(Channels.newOutputStream(channel))) {
+            out.writeObject(new SavedModel(model.metadata(), NetworkParameters.capture(model.network())));
+            out.flush();
+            // on disk before the swap, so a power cut can't leave a damaged model in place
+            channel.force(true);
+        }
+    }
+
+    private static SavedModel read(Path path) {
+        try (var in = new ObjectInputStream(Files.newInputStream(path))) {
+            if (in.readObject() instanceof SavedModel saved && saved.metadata() != null) {
+                return saved;
+            }
+            throw new StreamCorruptedException("not a fraud model file");
+        } catch (ClassNotFoundException | InvalidClassException e) {
+            throw new ModelLoadException(Reason.INCOMPATIBLE, path,
+                    "it was written by a different version of the code (" + e + ")", e);
+        } catch (IOException | RuntimeException e) {
+            throw new ModelLoadException(Reason.UNREADABLE, path, e.toString(), e);
+        }
+    }
+
+    private static void checkFeatures(SavedModel saved, Path path) {
+        List<String> savedNames = saved.metadata().featureNames();
+        if (savedNames.equals(FeatureExtractor.FEATURE_NAMES)) {
+            return;
+        }
+        List<String> added = new ArrayList<>(FeatureExtractor.FEATURE_NAMES);
+        added.removeAll(savedNames);
+        List<String> removed = new ArrayList<>(savedNames);
+        removed.removeAll(FeatureExtractor.FEATURE_NAMES);
+        throw new ModelLoadException(Reason.INCOMPATIBLE, path,
+                "it was trained with " + savedNames.size() + " features and the current FeatureExtractor has "
+                        + FeatureExtractor.NUM_FEATURES + ". Added: " + added + ". Removed: " + removed
+                        + (added.isEmpty() && removed.isEmpty() ? ". The feature order changed" : ""),
+                null);
+    }
+
+    private static void deleteTemporaryFile(Path tmp) {
+        try {
+            Files.deleteIfExists(tmp);
+        } catch (IOException e) {
+            log.warn("Could not delete temporary model file {}", tmp.toAbsolutePath(), e);
+        }
     }
 
     private record SavedModel(ModelMetadata metadata, NetworkParameters parameters) implements Serializable {

@@ -49,7 +49,7 @@ public class FraudDetectionService implements ApplicationRunner {
             model.set(loaded.get());
         } else if (properties.model().trainIfMissing()) {
             log.info("No fraud model found in {}, training a new one", repository.dir().toAbsolutePath());
-            train(properties.training());
+            train(properties.training(), false);
         } else {
             log.warn("No fraud model found in {}; scoring is unavailable until one is trained",
                     repository.dir().toAbsolutePath());
@@ -78,13 +78,31 @@ public class FraudDetectionService implements ApplicationRunner {
         return ModelInfo.of(currentModel().metadata(), properties.model().threshold());
     }
 
-    public ModelInfo train(Training cfg) {
+    /**
+     * Trains and activates a new model. An existing model is only replaced when {@code overwrite} is
+     * set, and if training or saving fails it stays in place and keeps serving.
+     */
+    public ModelInfo train(Training cfg, boolean overwrite) {
         if (!trainingLock.tryLock()) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Training is already in progress");
         }
         try {
+            boolean replacing = repository.exists();
+            if (replacing && !overwrite) {
+                throw new ResponseStatusException(HttpStatus.CONFLICT, "A model already exists in "
+                        + repository.dir().toAbsolutePath() + "; retrain with overwrite=true to replace it");
+            }
             FraudModel trained = trainer.train(cfg);
-            repository.save(trained);
+            try {
+                repository.save(trained, overwrite);
+            } catch (RuntimeException e) {
+                closeQuietly(trained);
+                throw e;
+            }
+            if (replacing) {
+                log.warn("Replaced the fraud model in {}; the previous model was not kept",
+                        repository.dir().toAbsolutePath());
+            }
             closeQuietly(model.getAndSet(trained));
             return ModelInfo.of(trained.metadata(), properties.model().threshold());
         } finally {

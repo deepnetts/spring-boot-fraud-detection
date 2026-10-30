@@ -109,6 +109,14 @@ class FraudDetectionApplicationTest {
     }
 
     @Test
+    void refusesToRetrainOverAnExistingModelWithoutOverwrite() throws Exception {
+        mvc.perform(post("/api/model/train"))
+                .andExpect(status().isConflict());
+        mvc.perform(post("/api/model/train").contentType(MediaType.APPLICATION_JSON).content("{\"overwrite\": false}"))
+                .andExpect(status().isConflict());
+    }
+
+    @Test
     void exposesModelInfo() throws Exception {
         mvc.perform(get("/api/model"))
                 .andExpect(status().isOk())

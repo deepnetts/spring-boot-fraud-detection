@@ -61,9 +61,11 @@ public class FraudDetectionController {
     @PostMapping("/model/train")
     public ModelInfo train(@Valid @RequestBody(required = false) TrainingRequest request) {
         var cfg = properties.training();
+        boolean overwrite = false;
         if (request != null) {
             cfg = cfg.withOverrides(request.samples(), request.fraudRate(), request.maxEpochs(), request.seed());
+            overwrite = Boolean.TRUE.equals(request.overwrite());
         }
-        return service.train(cfg);
+        return service.train(cfg, overwrite);
     }
 }

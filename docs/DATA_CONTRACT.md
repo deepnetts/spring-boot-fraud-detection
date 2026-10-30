@@ -19,7 +19,7 @@ that the code already computes it.
 |---|---|
 | Scoring API that requires all 16 model inputs and checks their ranges | Implemented |
 | 27 model features and z-score standardization | Implemented |
-| Rejecting a saved model trained with different feature names | Implemented, but the application then fails to start. Recovery is planned |
+| Rejecting a saved model trained with different feature names | Implemented. Startup stops with a clear message and the file is left unchanged |
 | Field definitions in [section 2.2](#22-definitions-contract-and-current-synthetic-behavior) | Contract requirement. Not computed or verified by the application |
 | Synthetic generator that follows the contract | Planned ([section 8](#8-synthetic-data)) |
 | CSV training data | Planned ([section 7](#7-csv-training-format-planned)) |
@@ -278,8 +278,8 @@ To change the features, edit `FeatureExtractor` and retrain:
 
 Removing a feature you cannot supply, such as the distance features, is a valid choice.
 
-**Current behavior with an existing model (Implemented):** a saved model records its feature names, and a
-model trained with different names is rejected. Today that stops the application from starting. Before
-restarting, move `fraud-model.bin` out of `fraud.model.dir`, or point `fraud.model.dir` at an empty folder.
-With `fraud.model.train-if-missing: true` the application then trains a new model. Recovery from this case
-is planned, and this section will be updated when it exists.
+**Behavior with an existing model (Implemented):** a saved model records its feature names, and a model
+trained with different names is rejected. Startup stops with a message naming the features that changed,
+and the file is left unchanged. The application never retrains over it, renames it or deletes it. To
+continue, move `fraud-model.bin` out of `fraud.model.dir`, or point `fraud.model.dir` at an empty folder.
+With `fraud.model.train-if-missing: true` the next start trains a new model.
