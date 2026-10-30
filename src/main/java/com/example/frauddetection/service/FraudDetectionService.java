@@ -65,19 +65,19 @@ public class FraudDetectionService implements ApplicationRunner {
     public FraudAssessment assess(Transaction transaction) {
         double threshold = properties.model().threshold();
         FraudModel current;
-        double probability;
+        double score;
         modelLock.readLock().lock();
         try {
             current = currentModel();
-            probability = current.predict(transaction);
+            score = current.predict(transaction);
         } finally {
             modelLock.readLock().unlock();
         }
         return new FraudAssessment(
                 transaction.transactionId(),
-                probability,
-                probability >= threshold,
-                FraudAssessment.RiskLevel.of(probability, threshold),
+                score,
+                score >= threshold,
+                FraudAssessment.RiskLevel.of(score, threshold),
                 threshold,
                 RiskIndicators.of(transaction),
                 current.metadata().trainedAt());

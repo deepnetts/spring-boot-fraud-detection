@@ -48,7 +48,7 @@ import com.example.frauddetection.model.ModelRepository;
 class FraudDetectionServiceTest {
 
     private static final String MODEL_FILE = "fraud-model.bin";
-    private static final Training TRAINING = new Training(2000, 0.05, 0.25, 0.3, List.of(8), 2, 0.001f, 0.0001f, 1);
+    private static final Training TRAINING = new Training(2000, 0.05, 0.25, 0.15, 0.3, List.of(8), 2, 0.001f, 0.0001f, 1);
     private static final Transaction TRANSACTION = new SyntheticTransactionGenerator(7).legitimate();
 
     private static FraudModel existingModel;

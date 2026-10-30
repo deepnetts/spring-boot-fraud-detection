@@ -24,7 +24,7 @@ public final class FraudModel implements AutoCloseable {
         this.metadata = metadata;
     }
 
-    /** Fraud probability in [0, 1]. */
+    /** Fraud score in [0, 1]: higher means more suspicious. It is not a calibrated probability. */
     public float predict(Transaction transaction) {
         return predictFeatures(FeatureExtractor.extract(transaction));
     }

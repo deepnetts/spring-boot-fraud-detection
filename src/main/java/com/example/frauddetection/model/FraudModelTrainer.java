@@ -2,8 +2,10 @@ package com.example.frauddetection.model;
 
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
+import java.util.Random;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -29,8 +31,9 @@ import deepnetts.net.train.opt.OptimizerType;
  * Trains a feed-forward network (ReLU hidden layers, sigmoid output, binary cross-entropy)
  * with Deep Netts.
  * <p>
- * Fraud is rare, so the training split is rebalanced by oversampling fraud examples while the
- * test split keeps the natural fraud rate for honest evaluation.
+ * The validation split chooses the recommended threshold and the test split gives the final metrics,
+ * and both keep the natural fraud rate. Fraud rows can optionally be oversampled in the training split
+ * only ({@code targetFraudShare}), but that isn't the default: it gave worse validation results.
  */
 @Component
 public class FraudModelTrainer {
@@ -50,15 +53,8 @@ public class FraudModelTrainer {
     }
 
     public FraudModel train(List<LabeledTransaction> data, Training cfg) {
-        // stratified split so the test set has the same fraud rate as the data
-        List<LabeledTransaction> train = new ArrayList<>();
-        List<LabeledTransaction> test = new ArrayList<>();
-        for (boolean label : new boolean[] {true, false}) {
-            List<LabeledTransaction> group = data.stream().filter(t -> t.fraud() == label).toList();
-            int testCount = (int) Math.round(group.size() * cfg.testFraction());
-            test.addAll(group.subList(0, testCount));
-            train.addAll(group.subList(testCount, group.size()));
-        }
+        Split split = split(data, cfg);
+        List<LabeledTransaction> train = split.train();
 
         List<float[]> trainFeatures = train.stream().map(t -> FeatureExtractor.extract(t.transaction())).toList();
         FeatureScaler scaler = FeatureScaler.fit(trainFeatures);
@@ -73,8 +69,9 @@ public class FraudModelTrainer {
                 .setStopError(1e-4f)
                 .setShuffle(true);
 
-        log.info("Training fraud model on {} examples ({} after oversampling fraud), {} features, hidden layers {}",
-                train.size(), trainingSet.size(), FeatureExtractor.NUM_FEATURES, cfg.hiddenLayers());
+        String oversampled = trainingSet.size() > train.size() ? " (" + trainingSet.size() + " after oversampling fraud)" : "";
+        log.info("Training fraud model on {} examples{}, {} features, hidden layers {}",
+                train.size(), oversampled, FeatureExtractor.NUM_FEATURES, cfg.hiddenLayers());
         long start = System.nanoTime();
         network.train(trainingSet);
         double seconds = (System.nanoTime() - start) / 1e9;
@@ -82,22 +79,55 @@ public class FraudModelTrainer {
         ModelMetadata provisional = new ModelMetadata(Instant.now(), FeatureExtractor.FEATURE_NAMES, scaler,
                 cfg.hiddenLayers(), trainingSet.size(), trainer.getCurrentEpoch(), seconds, null);
         FraudModel model = new FraudModel(network, provisional);
-        EvaluationReport report = evaluate(model, test);
-        log.info("Trained in {}s. Test ROC AUC {}, precision {}, recall {} at threshold {}",
-                String.format(Locale.ROOT, "%.1f", seconds), fmt(report.rocAuc()), fmt(report.precision()), fmt(report.recall()), threshold);
+        double recommendedThreshold = ModelEvaluator.recommendThreshold(scores(model, split.validation()),
+                labels(split.validation()));
+        EvaluationReport report = ModelEvaluator.evaluate(scores(model, split.test()), labels(split.test()), threshold,
+                recommendedThreshold);
+        log.info("Trained in {}s. Test ROC AUC {}, PR AUC {}, precision {}, recall {} at threshold {}, recommended threshold {}",
+                String.format(Locale.ROOT, "%.1f", seconds), fmt(report.rocAuc()), fmt(report.prAuc()),
+                fmt(report.precision()), fmt(report.recall()), threshold, recommendedThreshold);
 
         return new FraudModel(network, new ModelMetadata(provisional.trainedAt(), provisional.featureNames(), scaler,
                 cfg.hiddenLayers(), trainingSet.size(), provisional.epochs(), seconds, report));
     }
 
-    public EvaluationReport evaluate(FraudModel model, List<LabeledTransaction> test) {
-        float[] probabilities = new float[test.size()];
-        boolean[] labels = new boolean[test.size()];
-        for (int i = 0; i < test.size(); i++) {
-            probabilities[i] = model.predict(test.get(i).transaction());
-            labels[i] = test.get(i).fraud();
+    /**
+     * Stratified, so all three parts have the fraud rate of the data. It is shuffled first because
+     * real data is often sorted, by date for example. This random split suits the synthetic data, where
+     * rows are independent. Real transactions may need a time-based or customer-aware split instead.
+     */
+    static Split split(List<LabeledTransaction> data, Training cfg) {
+        List<LabeledTransaction> shuffled = new ArrayList<>(data);
+        Collections.shuffle(shuffled, new Random(cfg.seed()));
+
+        List<LabeledTransaction> train = new ArrayList<>();
+        List<LabeledTransaction> validation = new ArrayList<>();
+        List<LabeledTransaction> test = new ArrayList<>();
+        for (boolean label : new boolean[] {true, false}) {
+            List<LabeledTransaction> group = shuffled.stream().filter(t -> t.fraud() == label).toList();
+            int testEnd = (int) Math.round(group.size() * cfg.testFraction());
+            int validationEnd = testEnd + (int) Math.round(group.size() * cfg.validationFraction());
+            test.addAll(group.subList(0, testEnd));
+            validation.addAll(group.subList(testEnd, validationEnd));
+            train.addAll(group.subList(validationEnd, group.size()));
         }
-        return ModelEvaluator.evaluate(probabilities, labels, threshold);
+        return new Split(train, validation, test);
+    }
+
+    static float[] scores(FraudModel model, List<LabeledTransaction> transactions) {
+        float[] scores = new float[transactions.size()];
+        for (int i = 0; i < scores.length; i++) {
+            scores[i] = model.predict(transactions.get(i).transaction());
+        }
+        return scores;
+    }
+
+    static boolean[] labels(List<LabeledTransaction> transactions) {
+        boolean[] labels = new boolean[transactions.size()];
+        for (int i = 0; i < labels.length; i++) {
+            labels[i] = transactions.get(i).fraud();
+        }
+        return labels;
     }
 
     static FeedForwardNetwork buildNetwork(List<Integer> hiddenLayers, long seed) {
@@ -139,5 +169,8 @@ public class FraudModelTrainer {
 
     private static String fmt(double value) {
         return String.format(Locale.ROOT, "%.4f", value);
+    }
+
+    record Split(List<LabeledTransaction> train, List<LabeledTransaction> validation, List<LabeledTransaction> test) {
     }
 }

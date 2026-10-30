@@ -13,21 +13,24 @@ management:
 
 fraud:
   model:
-    # Where the trained network (.dnet) and its metadata (scaler, metrics) are stored
+    # Folder holding the trained model (fraud-model.bin: weights, scaler, metrics)
     dir: ./model
     # Train a model on startup when none is found in `dir`
     train-if-missing: true
-    # Probability above which a transaction is flagged as fraud
+    # Fraud score at or above which a transaction is flagged. Scores are not calibrated probabilities
     threshold: 0.5
   training:
     # Synthetic transactions generated for training + evaluation
-    samples: 20000
-    # Share of fraudulent transactions in the generated data (real-world fraud is rare)
+    samples: 12000
+    # Share of fraudulent transactions in the generated data. Set high for a quick demo: real card fraud is much rarer
     fraud-rate: 0.03
-    # Fraction of data held out for evaluation (kept at the natural fraud rate)
+    # Fraction of data held out for the final evaluation (kept at the natural fraud rate)
     test-fraction: 0.25
-    # Fraud examples are oversampled in the training split up to this share
-    target-fraud-share: 0.3
+    # Fraction of data held out for choosing the recommended threshold (kept at the natural fraud rate)
+    validation-fraction: 0.15
+    # Share of fraud to reach by duplicating fraud rows in the training split. 0 trains at the natural rate,
+    # which gave the best validation results on the synthetic data (see docs/DATA_CONTRACT.md)
+    target-fraud-share: 0
     hidden-layers: [32, 16]
     max-epochs: 15
     learning-rate: 0.001

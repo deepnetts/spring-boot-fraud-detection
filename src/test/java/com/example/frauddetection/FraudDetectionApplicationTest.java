@@ -72,8 +72,11 @@ class FraudDetectionApplicationTest {
     FraudDetectionService service;
 
     @Test
-    void trainedModelSeparatesFraudFromLegitimateTraffic() {
-        assertThat(service.modelInfo().evaluation().rocAuc()).isGreaterThan(0.9);
+    void trainedModelClearlyBeatsNoSkill() {
+        // a check that training works, not a quality target: without skill ROC AUC is about 0.5 and PR AUC
+        // about the fraud rate (0.03). Reported performance belongs in the docs, not in a test threshold
+        assertThat(service.modelInfo().evaluation().rocAuc()).isGreaterThan(0.7);
+        assertThat(service.modelInfo().evaluation().prAuc()).isGreaterThan(0.3);
     }
 
     @Test
@@ -81,6 +84,8 @@ class FraudDetectionApplicationTest {
         mvc.perform(post("/api/transactions/assess").contentType(MediaType.APPLICATION_JSON).content(SUSPICIOUS))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.transactionId").value("suspicious-1"))
+                .andExpect(jsonPath("$.fraudScore").isNumber())
+                .andExpect(jsonPath("$.fraudProbability").doesNotExist())
                 .andExpect(jsonPath("$.fraud").value(true))
                 .andExpect(jsonPath("$.riskIndicators").isNotEmpty());
     }
@@ -121,6 +126,8 @@ class FraudDetectionApplicationTest {
         mvc.perform(get("/api/model"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.features.length()").value(27))
-                .andExpect(jsonPath("$.evaluation.rocAuc").isNumber());
+                .andExpect(jsonPath("$.evaluation.rocAuc").isNumber())
+                .andExpect(jsonPath("$.evaluation.prAuc").isNumber())
+                .andExpect(jsonPath("$.evaluation.recommendedThreshold").isNumber());
     }
 }

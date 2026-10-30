@@ -38,7 +38,7 @@ import com.example.frauddetection.model.ModelLoadException.Reason;
 
 class ModelRepositoryTest {
 
-    private static final Training TRAINING = new Training(2000, 0.05, 0.25, 0.3, List.of(8), 2, 0.001f, 0.0001f, 1);
+    private static final Training TRAINING = new Training(2000, 0.05, 0.25, 0.15, 0.3, List.of(8), 2, 0.001f, 0.0001f, 1);
 
     private static FraudModel trained;
 
