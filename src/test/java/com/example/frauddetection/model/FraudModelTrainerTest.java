@@ -1,6 +1,8 @@
 package com.example.frauddetection.model;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Path;
@@ -15,6 +17,7 @@ import org.junit.jupiter.api.Test;
 import com.example.frauddetection.config.FraudProperties;
 import com.example.frauddetection.config.FraudProperties.Training;
 import com.example.frauddetection.data.SyntheticTransactionGenerator;
+import com.example.frauddetection.data.TrainingDataException;
 import com.example.frauddetection.domain.LabeledTransaction;
 import com.example.frauddetection.model.FraudModelTrainer.Split;
 
@@ -67,7 +70,8 @@ class FraudModelTrainerTest {
 
     @Test
     void recommendedThresholdIsChosenOnValidationDataAndMetricsComeFromTheTestSplit() throws Exception {
-        var properties = new FraudProperties(new FraudProperties.Model(Path.of("unused"), false, 0.5), TRAINING);
+        var properties = new FraudProperties(new FraudProperties.Model(Path.of("unused"), false, 0.5), TRAINING,
+                new FraudProperties.Data(FraudProperties.Data.Source.SYNTHETIC, null));
 
         try (FraudModel model = new FraudModelTrainer(properties).train(data, TRAINING)) {
             Split split = FraudModelTrainer.split(data, TRAINING);
@@ -79,6 +83,17 @@ class FraudModelTrainerTest {
             assertEquals(1000, report.testSamples());
             assertEquals(50, report.fraudSamples());
         }
+    }
+
+    @Test
+    void refusesDataWithoutEnoughFraudToEvaluateAModel() {
+        var properties = new FraudProperties(new FraudProperties.Model(Path.of("unused"), false, 0.5), TRAINING,
+                new FraudProperties.Data(FraudProperties.Data.Source.SYNTHETIC, null));
+        List<LabeledTransaction> rare = new SyntheticTransactionGenerator(11).generate(1000, 0.002);
+
+        var failure = assertThrows(TrainingDataException.class, () -> new FraudModelTrainer(properties).train(rare, TRAINING));
+
+        assertThat(failure.getMessage()).contains("needs both fraud and legitimate rows").contains("1000 rows, 2 of them fraud");
     }
 
     private static double fraudRate(List<LabeledTransaction> rows) {

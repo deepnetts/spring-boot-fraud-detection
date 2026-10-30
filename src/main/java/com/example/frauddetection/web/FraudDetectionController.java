@@ -3,7 +3,6 @@ package com.example.frauddetection.web;
 import java.util.List;
 import java.util.concurrent.ThreadLocalRandom;
 
-import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -24,7 +23,6 @@ import jakarta.validation.constraints.Size;
 
 @RestController
 @RequestMapping("/api")
-@Validated
 public class FraudDetectionController {
 
     private final FraudDetectionService service;

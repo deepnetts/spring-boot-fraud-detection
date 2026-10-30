@@ -13,7 +13,9 @@ import org.springframework.stereotype.Component;
 
 import com.example.frauddetection.config.FraudProperties;
 import com.example.frauddetection.config.FraudProperties.Training;
+import com.example.frauddetection.data.CsvTransactionReader;
 import com.example.frauddetection.data.SyntheticTransactionGenerator;
+import com.example.frauddetection.data.TrainingDataException;
 import com.example.frauddetection.domain.LabeledTransaction;
 import com.example.frauddetection.features.FeatureExtractor;
 import com.example.frauddetection.features.FeatureScaler;
@@ -41,19 +43,30 @@ public class FraudModelTrainer {
     private static final Logger log = LoggerFactory.getLogger(FraudModelTrainer.class);
 
     private final double threshold;
+    private final FraudProperties.Data dataSource;
 
     public FraudModelTrainer(FraudProperties properties) {
         this.threshold = properties.model().threshold();
+        this.dataSource = properties.data();
     }
 
+    /** Trains on the configured data source. */
     public FraudModel train(Training cfg) {
-        List<LabeledTransaction> data = new SyntheticTransactionGenerator(cfg.seed())
-                .generate(cfg.samples(), cfg.fraudRate());
-        return train(data, cfg);
+        return train(loadData(cfg), cfg);
+    }
+
+    private List<LabeledTransaction> loadData(Training cfg) {
+        return switch (dataSource.source()) {
+            case CSV -> CsvTransactionReader.read(dataSource.csvPath());
+            case SYNTHETIC -> new SyntheticTransactionGenerator(cfg.seed()).generate(cfg.samples(), cfg.fraudRate());
+        };
     }
 
     public FraudModel train(List<LabeledTransaction> data, Training cfg) {
         Split split = split(data, cfg);
+        requireBothClasses("training", split.train(), data);
+        requireBothClasses("validation", split.validation(), data);
+        requireBothClasses("test", split.test(), data);
         List<LabeledTransaction> train = split.train();
 
         List<float[]> trainFeatures = train.stream().map(t -> FeatureExtractor.extract(t.transaction())).toList();
@@ -112,6 +125,17 @@ public class FraudModelTrainer {
             train.addAll(group.subList(validationEnd, group.size()));
         }
         return new Split(train, validation, test);
+    }
+
+    /** Without both classes in every part, metrics like ROC AUC aren't defined. */
+    private static void requireBothClasses(String part, List<LabeledTransaction> rows, List<LabeledTransaction> data) {
+        long frauds = rows.stream().filter(LabeledTransaction::fraud).count();
+        if (frauds == 0 || frauds == rows.size()) {
+            long totalFrauds = data.stream().filter(LabeledTransaction::fraud).count();
+            throw new TrainingDataException("Not enough data to train and evaluate a model: the " + part
+                    + " split needs both fraud and legitimate rows. The data has " + data.size() + " rows, "
+                    + totalFrauds + " of them fraud.");
+        }
     }
 
     static float[] scores(FraudModel model, List<LabeledTransaction> transactions) {

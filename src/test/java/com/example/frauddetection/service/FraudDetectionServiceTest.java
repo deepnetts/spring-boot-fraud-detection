@@ -38,6 +38,7 @@ import org.springframework.web.server.ResponseStatusException;
 import com.example.frauddetection.config.FraudProperties;
 import com.example.frauddetection.config.FraudProperties.Training;
 import com.example.frauddetection.data.SyntheticTransactionGenerator;
+import com.example.frauddetection.data.TrainingDataException;
 import com.example.frauddetection.domain.Transaction;
 import com.example.frauddetection.model.FraudModel;
 import com.example.frauddetection.model.FraudModelTrainer;
@@ -224,6 +225,30 @@ class FraudDetectionServiceTest {
     }
 
     @Test
+    void unusableCsvDataKeepsTheExistingModel() throws Exception {
+        saveExistingModel();
+        byte[] before = Files.readAllBytes(file());
+        FraudDetectionService service = csvService(false);
+        service.run(null);
+        Instant loadedAt = service.modelInfo().trainedAt();
+
+        assertThrows(TrainingDataException.class, () -> service.train(TRAINING, true));
+
+        assertArrayEquals(before, Files.readAllBytes(file()));
+        assertEquals(loadedAt, service.modelInfo().trainedAt());
+        assertDoesNotThrow(() -> service.assess(TRANSACTION));
+    }
+
+    @Test
+    void unusableCsvDataOnFirstRunSavesNoModel() throws Exception {
+        FraudDetectionService service = csvService(true);
+
+        assertThrows(TrainingDataException.class, () -> service.run(null));
+
+        assertFalse(Files.exists(file()));
+    }
+
+    @Test
     @Timeout(60)
     void scoringInProgressFinishesBeforeARetrainClosesTheOldModel() throws Exception {
         saveExistingModel();
@@ -406,6 +431,16 @@ class FraudDetectionServiceTest {
         return service;
     }
 
+    private FraudDetectionService csvService(boolean trainIfMissing) throws IOException {
+        Path csv = dir.resolve("transactions.csv");
+        Files.writeString(csv, "this,is,not,the,expected,format\n");
+        var properties = new FraudProperties(new FraudProperties.Model(dir, trainIfMissing, 0.5), TRAINING,
+                new FraudProperties.Data(FraudProperties.Data.Source.CSV, csv));
+        var service = new FraudDetectionService(properties, new FraudModelTrainer(properties), new ModelRepository(properties));
+        services.add(service);
+        return service;
+    }
+
     private FraudModelTrainer countingTrainer() {
         return new FraudModelTrainer(properties(dir, false)) {
             @Override
@@ -431,7 +466,8 @@ class FraudDetectionServiceTest {
     }
 
     private static FraudProperties properties(Path dir, boolean trainIfMissing) {
-        return new FraudProperties(new FraudProperties.Model(dir, trainIfMissing, 0.5), TRAINING);
+        return new FraudProperties(new FraudProperties.Model(dir, trainIfMissing, 0.5), TRAINING,
+                new FraudProperties.Data(FraudProperties.Data.Source.SYNTHETIC, null));
     }
 
     private static byte[] patch(byte[] bytes, String from, String to) {

@@ -12,6 +12,11 @@ management:
         include: health,info
 
 fraud:
+  data:
+    # Where training data comes from: synthetic (generated, the default) or csv
+    source: synthetic
+    # The file to train on when source is csv. See "Train on your own data" in the README
+    csv-path: data/sample-transactions.csv
   model:
     # Folder holding the trained model (fraud-model.bin: weights, scaler, metrics)
     dir: ./model

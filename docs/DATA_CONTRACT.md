@@ -12,7 +12,6 @@ that the code already computes it.
 |---|---|
 | **Implemented** | The code does this today |
 | **Contract requirement** | A rule for whoever supplies real data. The application cannot check it |
-| **Planned** | Agreed for the MVP, not built yet |
 | **Not in the MVP** | Deliberately left out |
 
 | Capability | Status |
@@ -23,8 +22,8 @@ that the code already computes it.
 | Field definitions in [section 2.2](#22-definitions-contract-and-current-synthetic-behavior) | Contract requirement. Not computed or verified by the application |
 | Synthetic generator rules | Implemented ([section 8](#8-synthetic-data)) |
 | Validation split, PR AUC and recommended threshold | Implemented ([section 10](#10-evaluation-and-fraud-scores)) |
-| CSV training data | Planned ([section 7](#7-csv-training-format-planned)) |
-| `timestamp` and `customerId` metadata columns | Planned |
+| CSV training data | Implemented ([section 7](#7-csv-training-format)) |
+| `timestamp` and `customerId` metadata columns | Implemented: accepted, not read |
 | Time-based or customer-based evaluation | Not in the MVP |
 | Sending an unknown value | Not in the MVP ([section 3](#3-unknown-not-applicable-and-false)) |
 
@@ -130,7 +129,8 @@ separate models per channel. Both change the feature schema.
 
 ## 4. When a transaction cannot be scored
 
-**Implemented:** a request with a missing or out-of-range field gets a `400` response and no score.
+**Implemented:** a request with a missing or out-of-range field gets a `400` response that lists each failed
+field, and no score.
 
 **Contract requirement:** a `400` means **not scored**. It never means approved. The caller needs its own
 fallback, such as rules or manual review.
@@ -144,8 +144,6 @@ Transactions that cannot be scored under this contract include:
 
 If a value will never be available, either supply a real value from a named source (for example IP
 geolocation or a shipping address) or remove the feature and retrain ([section 9](#9-customizing-features)).
-
-Error responses that list exactly which fields failed are planned.
 
 ## 5. The 27 model features
 
@@ -199,9 +197,10 @@ check these. They do not apply to today's synthetic data, which has no timeline.
 - Fraud labels arrive late, often through chargebacks. Recent rows labelled legitimate may be undiscovered
   fraud.
 
-## 7. CSV training format (Planned)
+## 7. CSV training format
 
-CSV loading does not exist yet. This section defines the agreed format.
+**Implemented** in `CsvTransactionReader`. Set `fraud.data.source` to `csv` and `fraud.data.csv-path` to the file.
+Synthetic data stays the default. The README shows how to switch.
 
 | Column | Required | Purpose |
 |---|---|---|
@@ -212,12 +211,15 @@ CSV loading does not exist yet. This section defines the agreed format.
 | `customerId` | No | Metadata. A pseudonymized customer reference |
 
 **File rules:** a header row is required, column order is free, decimals use a dot, and encoding is UTF-8.
+Quoted values and commas inside values are not supported. The whole file is loaded into memory.
 
 **Validation rules:**
 
 - Rows follow the same validation as the API, and unknown `merchantCategory` values are rejected.
-- A missing or blank required value fails the load, with every problem reported by line number. Rows are
-  not silently skipped, because dropping them could change the fraud rate.
+- A missing or blank required value fails the load. Problems are reported by file, line and column, up to 20
+  at a time. Rows are not silently skipped, because dropping them could change the fraud rate.
+- The data must leave both fraud and legitimate rows in every split, or training stops with a clear message.
+- If training fails, no model is saved and any existing model stays in place.
 - Columns not listed above are ignored with a logged warning.
 
 **Metadata rules:**
@@ -227,8 +229,8 @@ CSV loading does not exist yet. This section defines the agreed format.
   secret key is not enough, because card numbers can be guessed by brute force.
 - Card numbers and other personal data must not appear in the file.
 
-**Limitation:** the MVP may read these columns but will not use them to split data. Time-based and
-customer-based evaluation can build on them later. Until then, metrics on real CSV data may look better
+**Limitation:** the reader accepts these columns but does not read them, so they are not used to split data.
+Time-based and customer-based evaluation can build on them later. Until then, metrics on real CSV data may look better
 than real performance, because transactions from the same customer can appear in both training and test
 data.
 
@@ -262,7 +264,8 @@ To change the features, edit `FeatureExtractor` and retrain:
 
 1. Change `FEATURE_NAMES` and `extract()` together. They must stay in the same order, because the vector
    is built by position and nothing checks the alignment.
-2. If you add or remove a `Transaction` field, update `Transaction`, `SyntheticTransactionGenerator` and
+2. If you add or remove a `Transaction` field, update `Transaction`, `SyntheticTransactionGenerator`,
+   `CsvTransactionReader` and
    any tests that build a `Transaction`.
 3. Update the feature count in `FraudDetectionApplicationTest`, which expects 27.
 4. Retrain.

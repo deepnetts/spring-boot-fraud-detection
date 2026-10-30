@@ -1,2 +1,3 @@
 org.springframework.boot.diagnostics.FailureAnalyzer=\
+com.example.frauddetection.data.TrainingDataFailureAnalyzer,\
 com.example.frauddetection.model.ModelLoadFailureAnalyzer

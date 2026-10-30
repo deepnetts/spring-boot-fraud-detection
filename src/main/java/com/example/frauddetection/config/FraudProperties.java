@@ -4,24 +4,44 @@ import java.nio.file.Path;
 import java.util.List;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.validation.annotation.Validated;
 
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.AssertTrue;
+import jakarta.validation.constraints.DecimalMax;
+import jakarta.validation.constraints.DecimalMin;
+import jakarta.validation.constraints.NotEmpty;
+import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Positive;
+import jakarta.validation.constraints.PositiveOrZero;
+
+/** Checked at startup: an invalid setting stops the application with a message naming it. */
+@Validated
 @ConfigurationProperties("fraud")
-public record FraudProperties(Model model, Training training) {
+public record FraudProperties(@NotNull @Valid Model model, @NotNull @Valid Training training, @NotNull @Valid Data data) {
 
-    public record Model(Path dir, boolean trainIfMissing, double threshold) {
+    public record Model(
+            @NotNull Path dir,
+            boolean trainIfMissing,
+            @DecimalMin(value = "0", inclusive = false) @DecimalMax(value = "1", inclusive = false) double threshold) {
     }
 
     public record Training(
-            int samples,
-            double fraudRate,
-            double testFraction,
-            double validationFraction,
-            double targetFraudShare,
-            List<Integer> hiddenLayers,
-            int maxEpochs,
-            float learningRate,
-            float l2Regularization,
+            @Positive int samples,
+            @DecimalMin(value = "0", inclusive = false) @DecimalMax(value = "1", inclusive = false) double fraudRate,
+            @DecimalMin(value = "0", inclusive = false) @DecimalMax(value = "1", inclusive = false) double testFraction,
+            @DecimalMin(value = "0", inclusive = false) @DecimalMax(value = "1", inclusive = false) double validationFraction,
+            @DecimalMin("0") @DecimalMax(value = "1", inclusive = false) double targetFraudShare,
+            @NotEmpty List<@Positive Integer> hiddenLayers,
+            @Positive int maxEpochs,
+            @Positive float learningRate,
+            @PositiveOrZero float l2Regularization,
             long seed) {
+
+        @AssertTrue(message = "test-fraction and validation-fraction must add up to less than 1")
+        public boolean isTrainingDataLeft() {
+            return testFraction + validationFraction < 1;
+        }
 
         public Training withOverrides(Integer samples, Double fraudRate, Integer maxEpochs, Long seed) {
             return new Training(
@@ -35,6 +55,18 @@ public record FraudProperties(Model model, Training training) {
                     learningRate,
                     l2Regularization,
                     seed != null ? seed : this.seed);
+        }
+    }
+
+    public record Data(@NotNull Source source, Path csvPath) {
+
+        public enum Source {
+            SYNTHETIC, CSV
+        }
+
+        @AssertTrue(message = "fraud.data.csv-path is required when fraud.data.source is csv")
+        public boolean isCsvPathSet() {
+            return source != Source.CSV || (csvPath != null && !csvPath.toString().isBlank());
         }
     }
 }

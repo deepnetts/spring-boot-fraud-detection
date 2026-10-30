@@ -46,8 +46,7 @@ That gives 27 inputs, z-score standardized. The scaler is fitted on the training
   calibrated probability**.
 - Synthetic data: `SyntheticTransactionGenerator` mixes legitimate traffic with four fraud patterns:
   stolen card, card testing, account takeover, and a "stealthy" pattern with only weak signals.
-  To train on real data, replace it with a loader that returns `List<LabeledTransaction>` and call
-  `FraudModelTrainer.train(data, cfg)`.
+  To use your own data, see [Train on your own data](#train-on-your-own-data).
 
 **Results on synthetic data** with the default settings, at threshold 0.5, on 3,000 test transactions containing 90 fraud cases:
 
@@ -65,7 +64,7 @@ These numbers show the pipeline working. They are not evidence of real-world per
 | POST | `/api/transactions/assess/batch` | Score up to 1000 transactions |
 | GET | `/api/transactions/sample?fraud=true` | Generate an example transaction |
 | GET | `/api/model` | Model info and evaluation metrics |
-| POST | `/api/model/train` | Train a model; optional body `{"samples":50000,"fraudRate":0.02,"maxEpochs":20,"seed":7,"overwrite":true}`. Returns `409` if a model already exists and `overwrite` is not `true` |
+| POST | `/api/model/train` | Train a model; optional body `{"samples":50000,"fraudRate":0.02,"maxEpochs":20,"seed":7,"overwrite":true}`. Returns `409` if a model already exists and `overwrite` is not `true`. `samples` and `fraudRate` apply to synthetic data only |
 
 ```bash
 curl -X POST localhost:8080/api/transactions/assess -H "Content-Type: application/json" -d '{
@@ -96,16 +95,72 @@ curl -X POST localhost:8080/api/transactions/assess -H "Content-Type: applicatio
 All fields are required. A request that leaves one out, or has a value out of range, gets a `400` response.
 This strict input is a demonstration limitation, not a recommended production design: unknown values cannot be sent, and a `400` means the transaction was not scored, never that it was approved. See the [data contract](docs/DATA_CONTRACT.md).
 
+Errors use the standard problem details format. A `400` lists each invalid field, and a batch request names the row:
+
+```json
+{
+  "title": "Bad Request",
+  "status": 400,
+  "detail": "The request has invalid fields",
+  "instance": "/api/transactions/assess/batch",
+  "errors": [{"field": "[1].amount", "message": "must be greater than or equal to 0"}]
+}
+```
+
 ## Configuration (`application.yml`)
 
 | Property | Default | Meaning |
 |---|---|---|
+| `fraud.data.source` | `synthetic` | Training data: `synthetic` or `csv` |
+| `fraud.data.csv-path` | `data/sample-transactions.csv` | The file to train on when the source is `csv` |
 | `fraud.model.dir` | `./model` | Where the trained model (`fraud-model.bin`: weights, scaler, metrics) is stored |
 | `fraud.model.train-if-missing` | `true` | Train on startup when no model exists |
 | `fraud.model.threshold` | `0.5` | Fraud score at or above which a transaction is flagged |
 | `fraud.training.*` | | Number of samples, fraud rate, test and validation fractions, oversampling target (`0` means none), hidden layers, epochs, learning rate, L2, seed |
 
+Settings are checked at startup. An invalid value, such as a `test-fraction` of 2, stops the application with a message naming the setting.
+
 To retrain after changing training settings, call `POST /api/model/train` with `{"overwrite":true}`, or move the model out of `./model` and restart.
+
+## Train on your own data
+
+Synthetic data is the default. To train on a CSV file instead:
+
+**1. Create a CSV file** with a header row and these columns, in any order:
+
+| Column | Required | Notes |
+|---|---|---|
+| The 16 transaction fields, `amount` to `newMerchant` | Yes | Same names and rules as the API request above |
+| `fraud` | Yes | The label, `true` or `false` |
+| `transactionId` | No | Kept with the row. Not a model input |
+| `timestamp`, `customerId` | No | Accepted but not read, so they can never become features. `customerId` must be a pseudonym, not a card or account number |
+
+[`data/sample-transactions.csv`](data/sample-transactions.csv) shows the format. Its 500 synthetic rows are enough to try this path, but far too few for meaningful metrics.
+
+**2. Switch the source.** Use a separate model folder, because an existing model is loaded instead of training a new one:
+
+```bash
+mvn spring-boot:run "-Dspring-boot.run.arguments=--fraud.data.source=csv --fraud.data.csv-path=data/sample-transactions.csv --fraud.model.dir=./model/csv"
+```
+
+To retrain later, call `POST /api/model/train` with `{"overwrite":true}`. CSV rows go through the same validation and feature engineering as API requests, so the model gets the same 27 features.
+
+**3. Fix any reported problems.** Training stops if any row is invalid, because skipping rows could change the fraud rate. An existing model stays in place. The error names the file, line and column:
+
+```text
+Invalid CSV file /data/transactions.csv (2 problems):
+  line 7, column amount: "abc" is not a number
+  line 9, column hourOfDay: must be less than or equal to 23
+```
+
+**Adapting this to real data:**
+
+- **Compute the history columns first.** `customerAvgAmount`, `transactionsLast24h`, `failedAttemptsLast24h`, `minutesSinceLastTransaction`, `distanceFromLastTransactionKm`, `newDevice` and `newMerchant` must be calculated from earlier events only. The [data contract](docs/DATA_CONTRACT.md) defines every field.
+- **Use real values.** There is no way to mark a value as unknown, so don't use `0` or another placeholder for it.
+- **Map your merchant codes** to the 10 categories in `MerchantCategory`.
+- **Keep values simple.** Use dots for decimals and UTF-8. Quoted values and commas inside values are not supported, and the whole file is loaded into memory.
+- **Evaluate for your data.** The split is random. Real chronological transactions may need a time-based or customer-aware evaluation, and the threshold should reflect your own costs.
+- **To change the columns,** edit `Transaction`, `FeatureExtractor` and `CsvTransactionReader`, then retrain.
 
 ## Saved models
 

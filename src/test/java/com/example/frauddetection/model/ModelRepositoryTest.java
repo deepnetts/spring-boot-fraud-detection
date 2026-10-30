@@ -65,7 +65,8 @@ class ModelRepositoryTest {
     }
 
     private static FraudProperties properties(Path dir) {
-        return new FraudProperties(new FraudProperties.Model(dir, false, 0.5), TRAINING);
+        return new FraudProperties(new FraudProperties.Model(dir, false, 0.5), TRAINING,
+                new FraudProperties.Data(FraudProperties.Data.Source.SYNTHETIC, null));
     }
 
     @Test
