@@ -7,6 +7,8 @@
 # Trained model files (created on first start, see README)
 /model/
 *.dnet
+fraud-model.bin
+fraud-model.meta
 
 # IDEs
 .idea/
