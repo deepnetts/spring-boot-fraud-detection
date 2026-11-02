@@ -51,6 +51,7 @@ public final class FeatureExtractor {
     private FeatureExtractor() {
     }
 
+    // TODO(customize): add, remove or change features here and in FEATURE_NAMES, in the same order, then retrain
     public static float[] extract(Transaction tx) {
         float[] f = new float[NUM_FEATURES];
         double hourAngle = 2 * Math.PI * tx.hourOfDay() / 24.0;

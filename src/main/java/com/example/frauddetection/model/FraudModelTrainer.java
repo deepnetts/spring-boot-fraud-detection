@@ -55,7 +55,7 @@ public class FraudModelTrainer {
         return train(loadData(cfg), cfg);
     }
 
-    private List<LabeledTransaction> loadData(Training cfg) {
+    public List<LabeledTransaction> loadData(Training cfg) {
         return switch (dataSource.source()) {
             case CSV -> CsvTransactionReader.read(dataSource.csvPath());
             case SYNTHETIC -> new SyntheticTransactionGenerator(cfg.seed()).generate(cfg.samples(), cfg.fraudRate());

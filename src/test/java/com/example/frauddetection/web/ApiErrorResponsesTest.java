@@ -140,6 +140,15 @@ class ApiErrorResponsesTest {
                 .andExpect(jsonPath("$.detail").value("Invalid CSV file data.csv (1 problem)"));
     }
 
+    @Test
+    void explainsWhyTheDataCannotBeSummarized() throws Exception {
+        when(service.dataSummary()).thenThrow(new TrainingDataException("CSV file not found: data.csv"));
+
+        mvc.perform(get("/api/data/summary"))
+                .andExpect(status().isUnprocessableContent())
+                .andExpect(jsonPath("$.detail").value("CSV file not found: data.csv"));
+    }
+
     private ResultActions post(String path, String body) throws Exception {
         return mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post(path)
                 .contentType(MediaType.APPLICATION_JSON).content(body));

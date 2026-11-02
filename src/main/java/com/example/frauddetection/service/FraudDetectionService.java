@@ -1,6 +1,7 @@
 package com.example.frauddetection.service;
 
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.ReadWriteLock;
@@ -17,11 +18,13 @@ import org.springframework.web.server.ResponseStatusException;
 
 import com.example.frauddetection.config.FraudProperties;
 import com.example.frauddetection.config.FraudProperties.Training;
+import com.example.frauddetection.data.DatasetSummary;
 import com.example.frauddetection.domain.Transaction;
 import com.example.frauddetection.model.FraudModel;
 import com.example.frauddetection.model.FraudModelTrainer;
 import com.example.frauddetection.model.ModelRepository;
 
+import io.micrometer.core.instrument.Metrics;
 import jakarta.annotation.PreDestroy;
 
 @Service
@@ -73,11 +76,13 @@ public class FraudDetectionService implements ApplicationRunner {
         } finally {
             modelLock.readLock().unlock();
         }
+        FraudAssessment.RiskLevel riskLevel = FraudAssessment.RiskLevel.of(score, threshold);
+        Metrics.counter("fraud.assessments", "risk", riskLevel.name()).increment();
         return new FraudAssessment(
                 transaction.transactionId(),
                 score,
                 score >= threshold,
-                FraudAssessment.RiskLevel.of(score, threshold),
+                riskLevel,
                 threshold,
                 RiskIndicators.of(transaction),
                 current.metadata().trainedAt());
@@ -89,6 +94,16 @@ public class FraudDetectionService implements ApplicationRunner {
 
     public ModelInfo modelInfo() {
         return ModelInfo.of(currentModel().metadata(), properties.model().threshold());
+    }
+
+    boolean modelLoaded() {
+        return model.get() != null;
+    }
+
+    /** Describes the data a training run would use, from the configured source. */
+    public DatasetSummary dataSummary() {
+        String source = properties.data().source().name().toLowerCase(Locale.ROOT);
+        return DatasetSummary.of(source, trainer.loadData(properties.training()));
     }
 
     /**

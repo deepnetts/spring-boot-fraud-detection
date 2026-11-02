@@ -32,11 +32,13 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.io.TempDir;
+import org.springframework.boot.health.contributor.Status;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
 
 import com.example.frauddetection.config.FraudProperties;
 import com.example.frauddetection.config.FraudProperties.Training;
+import com.example.frauddetection.data.DatasetSummary;
 import com.example.frauddetection.data.SyntheticTransactionGenerator;
 import com.example.frauddetection.data.TrainingDataException;
 import com.example.frauddetection.domain.Transaction;
@@ -45,6 +47,9 @@ import com.example.frauddetection.model.FraudModelTrainer;
 import com.example.frauddetection.model.ModelLoadException;
 import com.example.frauddetection.model.ModelLoadException.Reason;
 import com.example.frauddetection.model.ModelRepository;
+
+import io.micrometer.core.instrument.Metrics;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 
 class FraudDetectionServiceTest {
 
@@ -222,6 +227,64 @@ class FraudDetectionServiceTest {
         assertArrayEquals(before, Files.readAllBytes(file()));
         assertEquals(loadedAt, service.modelInfo().trainedAt());
         assertDoesNotThrow(() -> service.assess(TRANSACTION));
+    }
+
+    @Test
+    void summarizesTheConfiguredSyntheticDataWithoutTraining() {
+        FraudDetectionService service = service(false);
+
+        DatasetSummary summary = service.dataSummary();
+
+        assertEquals("synthetic", summary.source());
+        assertEquals(2000, summary.rows());
+        assertEquals(100, summary.fraudRows());
+        assertEquals(0, trainings);
+    }
+
+    @Test
+    void summarizesTheConfiguredCsvFile() {
+        var properties = new FraudProperties(new FraudProperties.Model(dir, false, 0.5), TRAINING,
+                new FraudProperties.Data(FraudProperties.Data.Source.CSV, Path.of("data", "sample-transactions.csv")));
+        var service = new FraudDetectionService(properties, new FraudModelTrainer(properties), new ModelRepository(properties));
+        services.add(service);
+
+        DatasetSummary summary = service.dataSummary();
+
+        assertEquals("csv", summary.source());
+        assertEquals(500, summary.rows());
+        assertEquals(15, summary.fraudRows());
+    }
+
+    @Test
+    void countsAssessmentsByRiskLevel() {
+        saveExistingModel();
+        FraudDetectionService service = service(false);
+        service.run(null);
+        var registry = new SimpleMeterRegistry();
+        Metrics.addRegistry(registry);
+        try {
+            FraudAssessment assessment = service.assess(TRANSACTION);
+            service.assess(TRANSACTION);
+
+            assertEquals(2, registry.get("fraud.assessments").tag("risk", assessment.riskLevel().name()).counter().count());
+        } finally {
+            Metrics.removeRegistry(registry);
+        }
+    }
+
+    @Test
+    void reportsHealthFromTheLoadedModel() {
+        saveExistingModel();
+        FraudDetectionService service = service(false);
+        var health = new ModelHealthIndicator(service);
+
+        assertEquals(Status.OUT_OF_SERVICE, health.health().getStatus());
+
+        service.run(null);
+        assertEquals(Status.UP, health.health().getStatus());
+
+        service.shutdown();
+        assertEquals(Status.OUT_OF_SERVICE, health.health().getStatus());
     }
 
     @Test

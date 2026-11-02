@@ -19,7 +19,7 @@ import com.example.frauddetection.domain.Transaction;
  *     <li><b>account takeover</b> – new device, new merchants, money transfers / digital goods</li>
  *     <li><b>stealthy</b> – mostly normal-looking, with only one or two weak signals</li>
  * </ul>
- * Replace this with a loader for your own labelled history to train on real data.
+ * To train on your own labelled history instead, set {@code fraud.data.source} to {@code csv}.
  */
 public class SyntheticTransactionGenerator {
 
@@ -79,6 +79,7 @@ public class SyntheticTransactionGenerator {
                 chance(0.15));
     }
 
+    // TODO(customize): this mix of fraud patterns is an assumption. Adapt it to the fraud you expect to see
     public Transaction fraudulent() {
         double pattern = random.nextDouble();
         if (pattern < 0.35) {

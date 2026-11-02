@@ -39,6 +39,7 @@ public final class CsvTransactionReader {
     private static final int MAX_LISTED_PROBLEMS = 20;
     private static final String LABEL = "fraud";
     private static final String ID = "transactionId";
+    // TODO(customize): keep these in step with Transaction if you add or remove fields
     private static final List<String> REQUIRED_COLUMNS = List.of("amount", "customerAvgAmount", "hourOfDay",
             "merchantCategory", "distanceFromHomeKm", "distanceFromLastTransactionKm", "minutesSinceLastTransaction",
             "transactionsLast24h", "failedAttemptsLast24h", "accountAgeDays", "cardNotPresent", "usedChip", "usedPin",

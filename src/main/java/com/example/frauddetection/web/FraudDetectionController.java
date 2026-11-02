@@ -11,6 +11,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.example.frauddetection.config.FraudProperties;
+import com.example.frauddetection.data.DatasetSummary;
 import com.example.frauddetection.data.SyntheticTransactionGenerator;
 import com.example.frauddetection.domain.Transaction;
 import com.example.frauddetection.service.FraudAssessment;
@@ -42,6 +43,11 @@ public class FraudDetectionController {
     public List<FraudAssessment> assessBatch(
             @RequestBody @NotEmpty @Size(max = 1000) List<@Valid Transaction> transactions) {
         return service.assessAll(transactions);
+    }
+
+    @GetMapping("/data/summary")
+    public DatasetSummary dataSummary() {
+        return service.dataSummary();
     }
 
     /** Generates a random example transaction, handy for trying out the API. */

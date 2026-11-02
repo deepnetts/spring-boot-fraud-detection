@@ -5,6 +5,7 @@ package com.example.frauddetection.domain;
  * (electronics, digital goods, gambling, money transfers) are historically higher risk.
  */
 public enum MerchantCategory {
+    // TODO(customize): use your own categories and map real merchant codes to them. This changes the features, so retrain
     GROCERY(false),
     RESTAURANT(false),
     FUEL(false),

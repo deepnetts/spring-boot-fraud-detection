@@ -9,7 +9,15 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info
+        include: health,info,metrics
+  endpoint:
+    health:
+      # Show the `model` status in /actuator/health
+      show-components: always
+      group:
+        readiness:
+          # Not ready to receive traffic until a model is loaded
+          include: readinessState,model
 
 fraud:
   data:
@@ -23,6 +31,7 @@ fraud:
     # Train a model on startup when none is found in `dir`
     train-if-missing: true
     # Fraud score at or above which a transaction is flagged. Scores are not calibrated probabilities
+    # TODO(customize): choose this from your own cost of missed fraud against false alarms
     threshold: 0.5
   training:
     # Synthetic transactions generated for training + evaluation

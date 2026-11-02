@@ -17,6 +17,7 @@ final class RiskIndicators {
 
     static List<String> of(Transaction tx) {
         List<String> flags = new ArrayList<>();
+        // TODO(customize): replace these rules and limits with your analysts' own
         double ratio = tx.amount() / Math.max(tx.customerAvgAmount(), 1.0);
         if (ratio >= 3) {
             flags.add(format("Amount is %.1fx the customer's average", ratio));
