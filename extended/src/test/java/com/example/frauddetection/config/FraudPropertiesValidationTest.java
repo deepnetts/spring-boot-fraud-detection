@@ -36,8 +36,6 @@ class FraudPropertiesValidationTest {
             "fraud.training.test-fraction=0,         testFraction",
             "fraud.training.test-fraction=2,         testFraction",
             "fraud.training.validation-fraction=0,   validationFraction",
-            "fraud.training.target-fraud-share=-0.1, targetFraudShare",
-            "fraud.training.target-fraud-share=1,    targetFraudShare",
             "fraud.training.hidden-layers=,          hiddenLayers",
             "fraud.training.hidden-layers=0,         hiddenLayers[0]",
             "fraud.training.max-epochs=0,            maxEpochs",
@@ -66,11 +64,6 @@ class FraudPropertiesValidationTest {
             assertThat(context).hasFailed();
             assertThat(failure(context.getStartupFailure())).contains("fraud.data.csv-path is required");
         });
-    }
-
-    @Test
-    void acceptsZeroToTurnOversamplingOff() {
-        runner.withPropertyValues("fraud.training.target-fraud-share=0").run(context -> assertThat(context).hasNotFailed());
     }
 
     private static String failure(Throwable startupFailure) {

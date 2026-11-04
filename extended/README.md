@@ -295,7 +295,7 @@ The data is shuffled with a fixed seed and split so that every part keeps the na
 
 A seeded random split suits this synthetic data, where rows are independent. Real chronological transactions may need a time-based or customer-aware split.
 
-The model trains at the natural fraud rate. Oversampling is available with `fraud.training.target-fraud-share`, but it gave worse validation results, so it is off by default.
+The model trains at the natural fraud rate, so the data stays imbalanced. Fraud rows are not duplicated or reweighted: oversampling was measured on validation data and gave worse results (see the [data contract](docs/DATA_CONTRACT.md#why-no-oversampling)).
 
 ### Synthetic data
 
@@ -460,7 +460,6 @@ Settings live in `src/main/resources/application.yml`.
 | `fraud.training.fraud-rate` | `0.03` | Share of fraud in the synthetic data |
 | `fraud.training.test-fraction` | `0.25` | Share of the data held out for the final evaluation |
 | `fraud.training.validation-fraction` | `0.15` | Share of the data held out for the recommended threshold |
-| `fraud.training.target-fraud-share` | `0` | Oversampling target for the training split. `0` means none |
 | `fraud.training.hidden-layers` | `[32, 16]` | Hidden layer sizes |
 | `fraud.training.max-epochs` | `15` | Maximum training epochs |
 | `fraud.training.learning-rate` | `0.001` | Learning rate |

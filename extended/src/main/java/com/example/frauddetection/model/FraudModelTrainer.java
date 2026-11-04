@@ -33,9 +33,8 @@ import deepnetts.net.train.opt.OptimizerType;
  * Trains a feed-forward network (ReLU hidden layers, sigmoid output, binary cross-entropy)
  * with Deep Netts.
  * <p>
- * The validation split chooses the recommended threshold and the test split gives the final metrics,
- * and both keep the natural fraud rate. Fraud rows can optionally be oversampled in the training split
- * only ({@code targetFraudShare}), but that isn't the default: it gave worse validation results.
+ * The validation split chooses the recommended threshold and the test split gives the final metrics.
+ * All three splits keep the natural fraud rate: the data is imbalanced and is not rebalanced.
  */
 @Component
 public class FraudModelTrainer {
@@ -63,6 +62,14 @@ public class FraudModelTrainer {
     }
 
     public FraudModel train(List<LabeledTransaction> data, Training cfg) {
+        return trainWithTestSet(data, cfg).model();
+    }
+
+    /** A trained model and the test split it was evaluated on, so that another model can be scored on the same rows. */
+    public record TrainingRun(FraudModel model, List<LabeledTransaction> testSet) {
+    }
+
+    public TrainingRun trainWithTestSet(List<LabeledTransaction> data, Training cfg) {
         Split split = split(data, cfg);
         requireBothClasses("training", split.train(), data);
         requireBothClasses("validation", split.validation(), data);
@@ -71,7 +78,7 @@ public class FraudModelTrainer {
 
         List<float[]> trainFeatures = train.stream().map(t -> FeatureExtractor.extract(t.transaction())).toList();
         FeatureScaler scaler = FeatureScaler.fit(trainFeatures);
-        TabularDataSet<MLDataItem> trainingSet = toOversampledDataSet(train, trainFeatures, scaler, cfg.targetFraudShare());
+        TabularDataSet<MLDataItem> trainingSet = toDataSet(train, trainFeatures, scaler);
 
         FeedForwardNetwork network = buildNetwork(cfg.hiddenLayers(), cfg.seed());
         BackpropagationTrainer trainer = network.getTrainer();
@@ -82,9 +89,8 @@ public class FraudModelTrainer {
                 .setStopError(1e-4f)
                 .setShuffle(true);
 
-        String oversampled = trainingSet.size() > train.size() ? " (" + trainingSet.size() + " after oversampling fraud)" : "";
-        log.info("Training fraud model on {} examples{}, {} features, hidden layers {}",
-                train.size(), oversampled, FeatureExtractor.NUM_FEATURES, cfg.hiddenLayers());
+        log.info("Training fraud model on {} examples, {} features, hidden layers {}",
+                train.size(), FeatureExtractor.NUM_FEATURES, cfg.hiddenLayers());
         long start = System.nanoTime();
         network.train(trainingSet);
         double seconds = (System.nanoTime() - start) / 1e9;
@@ -100,8 +106,9 @@ public class FraudModelTrainer {
                 String.format(Locale.ROOT, "%.1f", seconds), fmt(report.rocAuc()), fmt(report.prAuc()),
                 fmt(report.precision()), fmt(report.recall()), threshold, recommendedThreshold);
 
-        return new FraudModel(network, new ModelMetadata(provisional.trainedAt(), provisional.featureNames(), scaler,
-                cfg.hiddenLayers(), trainingSet.size(), provisional.epochs(), seconds, report));
+        FraudModel trained = new FraudModel(network, new ModelMetadata(provisional.trainedAt(), provisional.featureNames(),
+                scaler, cfg.hiddenLayers(), trainingSet.size(), provisional.epochs(), seconds, report));
+        return new TrainingRun(trained, split.test());
     }
 
     /**
@@ -167,25 +174,16 @@ public class FraudModelTrainer {
                 .build();
     }
 
-    private static TabularDataSet<MLDataItem> toOversampledDataSet(List<LabeledTransaction> train,
-            List<float[]> features, FeatureScaler scaler, double targetFraudShare) {
-        long frauds = train.stream().filter(LabeledTransaction::fraud).count();
-        long legit = train.size() - frauds;
-        // copies of each fraud example needed to reach the target share of fraud in the training set
-        int copies = frauds == 0 ? 1
-                : (int) Math.max(1, Math.round(targetFraudShare * legit / ((1 - targetFraudShare) * frauds)));
-
+    /** The training split at its natural fraud rate: fraud rows are not duplicated or reweighted. */
+    private static TabularDataSet<MLDataItem> toDataSet(List<LabeledTransaction> train, List<float[]> features,
+            FeatureScaler scaler) {
         TabularDataSet<MLDataItem> dataSet = new TabularDataSet<>(FeatureExtractor.NUM_FEATURES, 1);
         List<String> columns = new ArrayList<>(FeatureExtractor.FEATURE_NAMES);
         columns.add("fraud");
         dataSet.setColumnNames(columns.toArray(String[]::new));
 
         for (int i = 0; i < train.size(); i++) {
-            boolean fraud = train.get(i).fraud();
-            float[] input = scaler.transform(features.get(i));
-            for (int c = 0; c < (fraud ? copies : 1); c++) {
-                dataSet.add(new DataSetItem(input.clone(), new float[] {fraud ? 1 : 0}));
-            }
+            dataSet.add(new DataSetItem(scaler.transform(features.get(i)), new float[] {train.get(i).fraud() ? 1 : 0}));
         }
         dataSet.shuffle();
         return dataSet;

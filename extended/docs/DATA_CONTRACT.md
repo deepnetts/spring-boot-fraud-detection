@@ -325,21 +325,21 @@ fraud examples to train and evaluate in about a minute, and it is still imbalanc
 **Precision and PR AUC only hold at the fraud rate they were measured at.** With the recall and false-positive
 rate below, precision of 0.91 at a 3% fraud rate would be about 0.40 at a 0.2% fraud rate, with the same model.
 
-### Why no oversampling by default
+### Why no oversampling
 
-Oversampling duplicates fraud rows in the training split only. The default was chosen by the highest mean PR AUC
+Oversampling duplicates fraud rows in the training split only. Training at the natural fraud rate was chosen by the highest mean PR AUC
 on validation data, with models trained on development seeds and compared on a separately generated validation
 set of 6,000 rows. The test split below played no part.
 
-| `target-fraud-share` | Mean ROC AUC | Mean PR AUC | Precision at 0.5 | Recall at 0.5 |
+| Fraud share in training | Mean ROC AUC | Mean PR AUC | Precision at 0.5 | Recall at 0.5 |
 |---|---|---|---|---|
 | 0 (natural 3%) | 0.934 | 0.828 | 0.91–0.94 | 0.72–0.76 |
 | 0.10 | 0.926 | 0.812 | 0.74–0.87 | 0.76–0.78 |
 | 0.30 | 0.931 | 0.808 | 0.69–0.77 | 0.76–0.82 |
 
 Three seeds per setting, 12,000 samples. No oversampling had the best PR AUC on every seed. Oversampling gave
-slightly higher recall at a fixed threshold of 0.5, but lower precision. The setting remains available because
-results can differ on real data.
+slightly higher recall at a fixed threshold of 0.5, but lower precision. The setting was later removed, so the
+example trains only on imbalanced data. On real data the comparison may come out differently.
 
 ### Results
 

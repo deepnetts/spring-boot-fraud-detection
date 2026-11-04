@@ -42,9 +42,6 @@ fraud:
     test-fraction: 0.25
     # Fraction of data held out for choosing the recommended threshold (kept at the natural fraud rate)
     validation-fraction: 0.15
-    # Share of fraud to reach by duplicating fraud rows in the training split. 0 trains at the natural rate,
-    # which gave the best validation results on the synthetic data (see docs/DATA_CONTRACT.md)
-    target-fraud-share: 0
     hidden-layers: [32, 16]
     max-epochs: 15
     learning-rate: 0.001
