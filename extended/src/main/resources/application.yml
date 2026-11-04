@@ -47,3 +47,9 @@ fraud:
     learning-rate: 0.001
     l2-regularization: 0.0001
     seed: 42
+  retraining:
+    # Scheduled retraining, e.g. "0 0 3 * * *" for 03:00 every day; "-" turns it off.
+    # Retraining only helps when new labelled data has arrived (see "Retraining" in the README)
+    cron: "-"
+    # The new model replaces the active one only if its PR AUC on the same test rows is at most this much lower
+    quality-tolerance: 0.01

@@ -10,6 +10,7 @@ import jakarta.validation.Valid;
 import jakarta.validation.constraints.AssertTrue;
 import jakarta.validation.constraints.DecimalMax;
 import jakarta.validation.constraints.DecimalMin;
+import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Positive;
@@ -18,7 +19,18 @@ import jakarta.validation.constraints.PositiveOrZero;
 /** Checked at startup: an invalid setting stops the application with a message naming it. */
 @Validated
 @ConfigurationProperties("fraud")
-public record FraudProperties(@NotNull @Valid Model model, @NotNull @Valid Training training, @NotNull @Valid Data data) {
+public record FraudProperties(@NotNull @Valid Model model, @NotNull @Valid Training training, @NotNull @Valid Data data,
+        @NotNull @Valid Retraining retraining) {
+
+    /**
+     * Scheduled retraining, which only helps when new labelled data has arrived since the last training.
+     *
+     * @param cron             Spring cron expression, such as {@code 0 0 3 * * *} for 03:00 every day. {@code -} turns it off
+     * @param qualityTolerance how much lower, as an absolute PR AUC difference, the new model may score than the active
+     *                         model on the same test rows and still replace it
+     */
+    public record Retraining(@NotBlank String cron, @DecimalMin("0") @DecimalMax(value = "1", inclusive = false) double qualityTolerance) {
+    }
 
     public record Model(
             @NotNull Path dir,

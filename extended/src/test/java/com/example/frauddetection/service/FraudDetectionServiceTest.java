@@ -47,6 +47,7 @@ import com.example.frauddetection.model.FraudModelTrainer;
 import com.example.frauddetection.model.ModelLoadException;
 import com.example.frauddetection.model.ModelLoadException.Reason;
 import com.example.frauddetection.model.ModelRepository;
+import com.example.frauddetection.service.FraudDetectionService.RetrainingResult;
 
 import io.micrometer.core.instrument.Metrics;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -244,7 +245,7 @@ class FraudDetectionServiceTest {
     @Test
     void summarizesTheConfiguredCsvFile() {
         var properties = new FraudProperties(new FraudProperties.Model(dir, false, 0.5), TRAINING,
-                new FraudProperties.Data(FraudProperties.Data.Source.CSV, Path.of("data", "sample-transactions.csv")));
+                new FraudProperties.Data(FraudProperties.Data.Source.CSV, Path.of("data", "sample-transactions.csv")), new FraudProperties.Retraining("-", 0.01));
         var service = new FraudDetectionService(properties, new FraudModelTrainer(properties), new ModelRepository(properties));
         services.add(service);
 
@@ -464,6 +465,87 @@ class FraudDetectionServiceTest {
     }
 
     /** Must be called while holding the served network's monitor, so the scoring threads stop inside predict. */
+    @Test
+    void recordsOutcomesOfScoredTransactions() {
+        saveExistingModel();
+        FraudDetectionService service = service(false);
+        service.run(null);
+        FraudAssessment assessment = service.assess(withId(TRANSACTION, "tx-1"));
+
+        assertTrue(service.recordOutcome("tx-1", true));
+        assertFalse(service.recordOutcome("tx-1", true));
+        assertFalse(service.recordOutcome("never-scored", false));
+
+        PerformanceMonitor.Snapshot performance = service.monitoring().performance();
+        assertEquals(1, performance.assessments());
+        assertEquals(1, performance.labelledOutcomes());
+        assertEquals(assessment.fraud() ? 1 : 0, performance.truePositives());
+        assertEquals(assessment.fraud() ? 0 : 1, performance.falseNegatives());
+    }
+
+    @Test
+    void scheduledRetrainingActivatesANewModelThatIsNotWorse() {
+        saveExistingModel();
+        // a tolerance this wide lets any new model pass
+        FraudDetectionService service = service(new FraudProperties.Retraining("-", 0.99));
+        service.run(null);
+        service.assess(withId(TRANSACTION, "tx-1"));
+
+        RetrainingResult result = service.retrainIfBetter();
+
+        assertTrue(result.activated(), result.message());
+        assertNotEquals(existingModel.metadata().trainedAt(), service.modelInfo().trainedAt());
+        assertEquals(service.modelInfo().trainedAt(),
+                new ModelRepository(properties(dir, false)).load().orElseThrow().metadata().trainedAt());
+        // monitoring describes the active model, so it starts again
+        assertEquals(0, service.monitoring().performance().assessments());
+        assertEquals(result, service.monitoring().lastRetraining());
+    }
+
+    @Test
+    void scheduledRetrainingKeepsTheActiveModelWhenTheNewOneIsWorse() throws Exception {
+        saveExistingModel();
+        byte[] before = Files.readAllBytes(file());
+        // a negative tolerance demands an improvement no model can reach, so the new model always loses
+        FraudDetectionService service = service(new FraudProperties.Retraining("-", -1));
+        service.run(null);
+
+        RetrainingResult result = service.retrainIfBetter();
+
+        assertFalse(result.activated());
+        assertTrue(result.message().startsWith("Kept the active model"), result.message());
+        assertEquals(existingModel.metadata().trainedAt(), service.modelInfo().trainedAt());
+        assertArrayEquals(before, Files.readAllBytes(file()));
+        assertDoesNotThrow(() -> service.assess(TRANSACTION));
+    }
+
+    @Test
+    void scheduledRetrainingWithoutAModelIsSkipped() {
+        FraudDetectionService service = service(false);
+        service.run(null);
+
+        RetrainingResult result = service.retrainIfBetter();
+
+        assertFalse(result.activated());
+        assertTrue(result.message().startsWith("Skipped"), result.message());
+        assertFalse(Files.exists(file()));
+    }
+
+    private static Transaction withId(Transaction t, String transactionId) {
+        return new Transaction(transactionId, t.amount(), t.customerAvgAmount(), t.hourOfDay(), t.merchantCategory(),
+                t.distanceFromHomeKm(), t.distanceFromLastTransactionKm(), t.minutesSinceLastTransaction(),
+                t.transactionsLast24h(), t.failedAttemptsLast24h(), t.accountAgeDays(), t.cardNotPresent(), t.usedChip(),
+                t.usedPin(), t.foreignTransaction(), t.newDevice(), t.newMerchant());
+    }
+
+    private FraudDetectionService service(FraudProperties.Retraining retraining) {
+        FraudProperties properties = new FraudProperties(new FraudProperties.Model(dir, false, 0.5), TRAINING,
+                new FraudProperties.Data(FraudProperties.Data.Source.SYNTHETIC, null), retraining);
+        var service = new FraudDetectionService(properties, new FraudModelTrainer(properties), new ModelRepository(properties));
+        services.add(service);
+        return service;
+    }
+
     private static void startBlockedScoring(FraudDetectionService service, List<FutureTask<FraudAssessment>> scoring)
             throws InterruptedException {
         for (int i = 0; i < 4; i++) {
@@ -498,7 +580,7 @@ class FraudDetectionServiceTest {
         Path csv = dir.resolve("transactions.csv");
         Files.writeString(csv, "this,is,not,the,expected,format\n");
         var properties = new FraudProperties(new FraudProperties.Model(dir, trainIfMissing, 0.5), TRAINING,
-                new FraudProperties.Data(FraudProperties.Data.Source.CSV, csv));
+                new FraudProperties.Data(FraudProperties.Data.Source.CSV, csv), new FraudProperties.Retraining("-", 0.01));
         var service = new FraudDetectionService(properties, new FraudModelTrainer(properties), new ModelRepository(properties));
         services.add(service);
         return service;
@@ -530,7 +612,7 @@ class FraudDetectionServiceTest {
 
     private static FraudProperties properties(Path dir, boolean trainIfMissing) {
         return new FraudProperties(new FraudProperties.Model(dir, trainIfMissing, 0.5), TRAINING,
-                new FraudProperties.Data(FraudProperties.Data.Source.SYNTHETIC, null));
+                new FraudProperties.Data(FraudProperties.Data.Source.SYNTHETIC, null), new FraudProperties.Retraining("-", 0.01));
     }
 
     private static byte[] patch(byte[] bytes, String from, String to) {

@@ -3,12 +3,15 @@ package com.example.frauddetection.web;
 import java.util.List;
 import java.util.concurrent.ThreadLocalRandom;
 
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.server.ResponseStatusException;
 
 import com.example.frauddetection.config.FraudProperties;
 import com.example.frauddetection.data.DatasetSummary;
@@ -16,6 +19,7 @@ import com.example.frauddetection.data.SyntheticTransactionGenerator;
 import com.example.frauddetection.domain.Transaction;
 import com.example.frauddetection.service.FraudAssessment;
 import com.example.frauddetection.service.FraudDetectionService;
+import com.example.frauddetection.service.FraudDetectionService.MonitoringReport;
 import com.example.frauddetection.service.ModelInfo;
 
 import jakarta.validation.Valid;
@@ -71,5 +75,21 @@ public class FraudDetectionController {
             overwrite = Boolean.TRUE.equals(request.overwrite());
         }
         return service.train(cfg, overwrite);
+    }
+
+    /** Reports the confirmed outcome of a scored transaction, for example after a chargeback or a review. */
+    @PostMapping("/monitoring/outcomes")
+    public ResponseEntity<Void> recordOutcome(@Valid @RequestBody OutcomeRequest outcome) {
+        if (!service.recordOutcome(outcome.transactionId(), outcome.fraud())) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "No decision for transaction " + outcome.transactionId()
+                    + " is waiting for an outcome. Only transactions scored with a transactionId by the active model can"
+                    + " receive one, and each only once");
+        }
+        return ResponseEntity.noContent().build();
+    }
+
+    @GetMapping("/monitoring")
+    public MonitoringReport monitoring() {
+        return service.monitoring();
     }
 }

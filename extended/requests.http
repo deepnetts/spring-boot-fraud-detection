@@ -1,0 +1,88 @@
+### Readiness: OUT_OF_SERVICE while the first model trains, UP once scoring is available
+GET http://localhost:8080/actuator/health/readiness
+
+### Data analysis: size, fraud rate, fraud by category, and fraud compared with legitimate transactions
+GET http://localhost:8080/api/data/summary
+
+### Model information and evaluation on the test split (synthetic data)
+GET http://localhost:8080/api/model
+
+### Score a suspicious transaction -> expected fraud: true, riskLevel CRITICAL
+POST http://localhost:8080/api/transactions/assess
+Content-Type: application/json
+
+{"transactionId": "tx-1001", "amount": 2499.99, "customerAvgAmount": 45.0, "hourOfDay": 3,
+ "merchantCategory": "ELECTRONICS", "distanceFromHomeKm": 850, "distanceFromLastTransactionKm": 790,
+ "minutesSinceLastTransaction": 12, "transactionsLast24h": 11, "failedAttemptsLast24h": 3, "accountAgeDays": 400,
+ "cardNotPresent": true, "usedChip": false, "usedPin": false, "foreignTransaction": true, "newDevice": true,
+ "newMerchant": true}
+
+### Score an ordinary transaction -> expected fraud: false, riskLevel LOW
+POST http://localhost:8080/api/transactions/assess
+Content-Type: application/json
+
+{"transactionId": "tx-1002", "amount": 42.10, "customerAvgAmount": 55.0, "hourOfDay": 13,
+ "merchantCategory": "GROCERY", "distanceFromHomeKm": 3.2, "distanceFromLastTransactionKm": 2.5,
+ "minutesSinceLastTransaction": 720, "transactionsLast24h": 2, "failedAttemptsLast24h": 0, "accountAgeDays": 1500,
+ "cardNotPresent": false, "usedChip": true, "usedPin": true, "foreignTransaction": false, "newDevice": false,
+ "newMerchant": false}
+
+### Score several transactions at once (up to 1,000)
+POST http://localhost:8080/api/transactions/assess/batch
+Content-Type: application/json
+
+[{"transactionId": "tx-1003", "amount": 18.50, "customerAvgAmount": 25.0, "hourOfDay": 9,
+  "merchantCategory": "RESTAURANT", "distanceFromHomeKm": 1.2, "distanceFromLastTransactionKm": 0.8,
+  "minutesSinceLastTransaction": 300, "transactionsLast24h": 3, "failedAttemptsLast24h": 0, "accountAgeDays": 900,
+  "cardNotPresent": false, "usedChip": true, "usedPin": false, "foreignTransaction": false, "newDevice": false,
+  "newMerchant": false},
+ {"transactionId": "tx-1004", "amount": 4.99, "customerAvgAmount": 60.0, "hourOfDay": 2,
+  "merchantCategory": "DIGITAL_GOODS", "distanceFromHomeKm": 40, "distanceFromLastTransactionKm": 35,
+  "minutesSinceLastTransaction": 3, "transactionsLast24h": 14, "failedAttemptsLast24h": 4, "accountAgeDays": 700,
+  "cardNotPresent": true, "usedChip": false, "usedPin": false, "foreignTransaction": false, "newDevice": true,
+  "newMerchant": true}]
+
+### Invalid request: negative amount and hour 30 -> 400 with each invalid field
+POST http://localhost:8080/api/transactions/assess
+Content-Type: application/json
+
+{"amount": -5, "hourOfDay": 30}
+
+### A generated example transaction to experiment with
+GET http://localhost:8080/api/transactions/sample?fraud=true
+
+### Monitoring: report that tx-1001 really was fraud (send it after scoring tx-1001) -> 204
+POST http://localhost:8080/api/monitoring/outcomes
+Content-Type: application/json
+
+{"transactionId": "tx-1001", "fraud": true}
+
+### Monitoring: report that tx-1002 was legitimate -> 204
+POST http://localhost:8080/api/monitoring/outcomes
+Content-Type: application/json
+
+{"transactionId": "tx-1002", "fraud": false}
+
+### Monitoring: an outcome for a transaction the active model never scored -> 404
+POST http://localhost:8080/api/monitoring/outcomes
+Content-Type: application/json
+
+{"transactionId": "unknown-transaction", "fraud": true}
+
+### Monitoring: alert rate, outcomes, precision and recall of the active model, and the last scheduled retraining
+GET http://localhost:8080/api/monitoring
+
+### Scoring counter for one risk level (returns 404 until a CRITICAL transaction has been scored since the start)
+GET http://localhost:8080/actuator/metrics/fraud.assessments?tag=risk:CRITICAL
+
+### Application health, including the model status
+GET http://localhost:8080/actuator/health
+
+### Retrain without permission to replace the model -> 409, because a model already exists
+POST http://localhost:8080/api/model/train
+
+### Retrain and replace the model. The old model is not kept; this takes about a minute
+POST http://localhost:8080/api/model/train
+Content-Type: application/json
+
+{"overwrite": true}

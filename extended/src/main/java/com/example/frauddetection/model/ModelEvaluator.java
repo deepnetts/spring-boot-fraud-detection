@@ -2,7 +2,9 @@ package com.example.frauddetection.model;
 
 import java.util.Arrays;
 import java.util.Comparator;
+import java.util.List;
 
+import com.example.frauddetection.domain.LabeledTransaction;
 import com.example.frauddetection.model.EvaluationReport.ConfusionMatrix;
 
 /**
@@ -52,6 +54,11 @@ public final class ModelEvaluator {
             }
         }
         return bestThreshold;
+    }
+
+    /** PR AUC of a model on labelled transactions, for comparing two models on the same rows. */
+    public static double prAuc(FraudModel model, List<LabeledTransaction> rows) {
+        return averagePrecision(FraudModelTrainer.scores(model, rows), FraudModelTrainer.labels(rows));
     }
 
     /**

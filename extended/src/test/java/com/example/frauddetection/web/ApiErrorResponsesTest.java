@@ -149,6 +149,30 @@ class ApiErrorResponsesTest {
                 .andExpect(jsonPath("$.detail").value("CSV file not found: data.csv"));
     }
 
+    @Test
+    void acceptsAnOutcomeForAScoredTransaction() throws Exception {
+        when(service.recordOutcome("tx-1", true)).thenReturn(true);
+
+        post("/api/monitoring/outcomes", "{\"transactionId\": \"tx-1\", \"fraud\": true}")
+                .andExpect(status().isNoContent());
+    }
+
+    @Test
+    void explainsWhyAnOutcomeCannotBeRecorded() throws Exception {
+        when(service.recordOutcome(any(), anyBoolean())).thenReturn(false);
+
+        post("/api/monitoring/outcomes", "{\"transactionId\": \"tx-9\", \"fraud\": false}")
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.detail").value(containsString("No decision for transaction tx-9")));
+    }
+
+    @Test
+    void namesTheMissingFieldsOfAnOutcome() throws Exception {
+        post("/api/monitoring/outcomes", "{\"transactionId\": \" \"}")
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errors.length()").value(2));
+    }
+
     private ResultActions post(String path, String body) throws Exception {
         return mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post(path)
                 .contentType(MediaType.APPLICATION_JSON).content(body));

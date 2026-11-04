@@ -71,7 +71,7 @@ class FraudModelTrainerTest {
     @Test
     void recommendedThresholdIsChosenOnValidationDataAndMetricsComeFromTheTestSplit() throws Exception {
         var properties = new FraudProperties(new FraudProperties.Model(Path.of("unused"), false, 0.5), TRAINING,
-                new FraudProperties.Data(FraudProperties.Data.Source.SYNTHETIC, null));
+                new FraudProperties.Data(FraudProperties.Data.Source.SYNTHETIC, null), new FraudProperties.Retraining("-", 0.01));
 
         try (FraudModel model = new FraudModelTrainer(properties).train(data, TRAINING)) {
             Split split = FraudModelTrainer.split(data, TRAINING);
@@ -88,7 +88,7 @@ class FraudModelTrainerTest {
     @Test
     void refusesDataWithoutEnoughFraudToEvaluateAModel() {
         var properties = new FraudProperties(new FraudProperties.Model(Path.of("unused"), false, 0.5), TRAINING,
-                new FraudProperties.Data(FraudProperties.Data.Source.SYNTHETIC, null));
+                new FraudProperties.Data(FraudProperties.Data.Source.SYNTHETIC, null), new FraudProperties.Retraining("-", 0.01));
         List<LabeledTransaction> rare = new SyntheticTransactionGenerator(11).generate(1000, 0.002);
 
         var failure = assertThrows(TrainingDataException.class, () -> new FraudModelTrainer(properties).train(rare, TRAINING));
