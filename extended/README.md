@@ -1,10 +1,10 @@
-# Fraud Detection PoC with Spring Boot and Deep Netts
+# Fraud Detection with Deep Netts: Extended Example
 
-A Java proof of concept that scores card transactions for fraud through a REST API, using a feed-forward neural network trained with [Deep Netts](https://www.deepnetts.com).
+A Java proof of concept that scores card transactions for fraud through a REST API, using a feed-forward neural network trained with [Deep Netts](https://www.deepnetts.com). This extended example covers the full machine learning lifecycle. For the smallest complete integration, start with the [minimal example](../minimal/README.md). The [repository README](../README.md) compares the two.
 
 **Built with:** Java 25, Spring Boot 4.0, Deep Netts 4.0.4 (`com.deepnetts:deepnetts-core`) and Maven.
 
-**Contents:** [Overview](#overview) · [Architecture](#architecture) · [Key Features](#key-features) · [Quick Start](#quick-start) · [API Usage](#api-usage) · [Model Training & Evaluation](#model-training--evaluation) · [Full Demo Walkthrough](#full-demo-walkthrough) · [Configuration & Customization](#configuration--customization) · [Known Limitations](#known-limitations)
+**Contents:** [Overview](#overview) · [Architecture](#architecture) · [Key Features](#key-features) · [Quick Start](#quick-start) · [API Usage](#api-usage) · [Model Training & Evaluation](#model-training--evaluation) · [Full Demo Walkthrough](#full-demo-walkthrough) · [Monitoring & Retraining](#monitoring--retraining) · [Configuration & Customization](#configuration--customization) · [Known Limitations](#known-limitations)
 
 ## Overview
 
@@ -18,6 +18,7 @@ With this project you can:
 - Review its evaluation metrics on data it did not train on
 - Score transactions over HTTP and get a fraud score, a risk level and rule-based risk indicators
 - Follow a complete workflow, including validation errors, monitoring and protected retraining
+- Compare the model's decisions with confirmed outcomes, and retrain it on a schedule
 
 > [!IMPORTANT]
 > This is a PoC for local use, not a production service. The default data is synthetic, so the results show that the pipeline works. They are not evidence of real-world performance.
@@ -74,10 +75,12 @@ Training shares the same feature code. `FraudModelTrainer` loads the data, split
 |---|---|
 | Scoring API | Single and batch scoring (up to 1,000 transactions) with a fraud score, risk level and risk indicators |
 | Training data | Synthetic data by default, or a CSV file of your own |
+| Data analysis | Fraud rate by category, and fraud compared with legitimate transactions field by field |
 | Evaluation | Metrics on a test split the model did not train on, plus a recommended threshold |
 | Model persistence | A model is trained on first start and loaded on later starts. An existing model is replaced only on request |
 | Validation | Invalid request fields are listed in the error response, and invalid settings stop startup with a clear message |
-| Monitoring | Health, readiness and a scoring counter by risk level through Spring Boot Actuator |
+| Monitoring | Health, readiness and a scoring counter through Spring Boot Actuator, plus PoC performance monitoring from confirmed outcomes |
+| Retraining | Retraining on request, and optional scheduled retraining that keeps the active model unless the new one is at least as good |
 
 ## Quick Start
 
@@ -89,9 +92,10 @@ The application is a REST API with no graphical frontend and no Swagger page. Th
 - Maven 3.9 or newer
 - `curl` and a bash-compatible shell for the examples, such as Git Bash on Windows
 
-**1. Start the application.** Leave it running and use a second terminal for the next steps. To stop it later, press Ctrl+C in this terminal.
+**1. Start the application** from the `extended` folder. Leave it running and use a second terminal for the next steps. To stop it later, press Ctrl+C in this terminal.
 
 ```bash
+cd extended
 mvn spring-boot:run
 ```
 
@@ -134,6 +138,7 @@ The application has no graphical frontend, and nothing needs to be built to try 
 |---|---|---|
 | Terminal (Bash or Git Bash) | All endpoints | Use `curl`, as in the [Quick Start](#quick-start) |
 | Postman or a similar HTTP client | All endpoints | Send JSON as the request body. See [Sending a request with Postman](#sending-a-request-with-postman) |
+| IntelliJ IDEA or VS Code | All endpoints | Run the requests in [`requests.http`](requests.http), which holds an example of every request |
 | Web browser | GET endpoints only | Open a URL such as `http://localhost:8080/api/model`, `http://localhost:8080/api/data/summary` or `http://localhost:8080/actuator/health` |
 
 ### Endpoints
@@ -143,9 +148,11 @@ The application has no graphical frontend, and nothing needs to be built to try 
 | POST | `/api/transactions/assess` | Score one transaction |
 | POST | `/api/transactions/assess/batch` | Score up to 1,000 transactions |
 | GET | `/api/transactions/sample?fraud=true` | Generate an example transaction |
-| GET | `/api/data/summary` | Rows, fraud rate and fraud rate by category for the configured training data |
+| GET | `/api/data/summary` | Rows, fraud rate, fraud rate by category, and fraud compared with legitimate transactions, for the configured training data |
 | GET | `/api/model` | Model information and evaluation metrics |
 | POST | `/api/model/train` | Train a model |
+| POST | `/api/monitoring/outcomes` | Report the confirmed outcome of a scored transaction |
+| GET | `/api/monitoring` | Alert rate, outcomes, precision and recall of the active model, and the last scheduled retraining |
 | GET | `/actuator/health` | Application health, including a `model` status |
 | GET | `/actuator/health/readiness` | Ready only when a model is loaded |
 | GET | `/actuator/metrics/fraud.assessments` | Scoring count by risk level |
@@ -241,6 +248,7 @@ Errors use the standard problem details format (RFC 9457).
 | Status | When |
 |---|---|
 | `400` | A request is invalid. Each invalid field is listed, and a batch error names the row |
+| `404` | An outcome was reported for a transaction that the active model has not scored, or whose outcome was already reported |
 | `409` | Training was requested while a model exists and `overwrite` is not `true`, or while training is already in progress |
 | `422` | The configured training data cannot be used, for example a CSV file with invalid rows |
 | `503` | No model is loaded yet |
@@ -338,7 +346,7 @@ See the [data contract](docs/DATA_CONTRACT.md#10-evaluation-and-fraud-scores) fo
 
 ## Full Demo Walkthrough
 
-These steps show the full workflow with the default settings, so the expected values come from the default demonstration setup. Start with an empty `./model` folder so the first run trains a new model. If you followed the [Quick Start](#quick-start) on a fresh checkout, the application is already running and you can continue from step 3.
+These steps show the full workflow with the default settings, so the expected values come from the default demonstration setup. Run them from the `extended` folder, and start with an empty `./model` folder so the first run trains a new model. If you followed the [Quick Start](#quick-start) on a fresh checkout, the application is already running and you can continue from step 3.
 
 ### 1. Start the application
 
@@ -358,7 +366,7 @@ curl localhost:8080/actuator/health/readiness
 curl localhost:8080/api/data/summary
 ```
 
-**Expect** `"rows":12000,"fraudRows":360,"fraudRate":0.03`, then the fraud rate by category. Electronics, for example, is about 8% fraud and groceries under 1%.
+**Expect** `"rows":12000,"fraudRows":360,"fraudRate":0.03`, then the fraud rate by category. Electronics, for example, is about 8% fraud and groceries under 1%. The `features` list then compares fraud with legitimate transactions. In the default data, for example, a fraudulent payment averages 6.8 times the customer's usual amount against 1.5 for a legitimate one, and half of the fraud happens between midnight and 6 AM against 2.5% of legitimate payments.
 
 ### 4. See how the model did
 
@@ -443,6 +451,74 @@ curl localhost:8080/api/data/summary
 
 **Expect** `"source":"csv","rows":500,"fraudRows":15`. The sample is small, so this trains in seconds, and its metrics mean nothing because the test split holds only 4 fraud cases.
 
+## Monitoring & Retraining
+
+### Monitoring model performance (PoC)
+
+A model's test results describe the past. Once it is in use, the only way to know how well it works is to compare its decisions with what really happened, which is often known only weeks later, after a chargeback or an analyst's review. This example shows that loop in a simple form:
+
+1. Score transactions with a `transactionId`.
+2. Report each confirmed outcome with `POST /api/monitoring/outcomes`.
+3. Read precision, recall and the alert rate of the active model with `GET /api/monitoring`.
+
+```bash
+curl -X POST localhost:8080/api/monitoring/outcomes -H "Content-Type: application/json" -d '{"transactionId": "tx-1001", "fraud": true}'
+```
+
+```bash
+curl localhost:8080/api/monitoring
+```
+
+After scoring the suspicious `tx-1001` and the ordinary `tx-1002` from [`requests.http`](requests.http), and reporting both outcomes, the response is:
+
+```json
+{
+  "performance": {
+    "assessments": 2, "alerts": 1, "alertRate": 0.5, "labelledOutcomes": 2,
+    "truePositives": 1, "falsePositives": 0, "falseNegatives": 0, "trueNegatives": 1,
+    "precision": 1.0, "recall": 1.0
+  },
+  "lastRetraining": null
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `alertRate` | Share of scored transactions that were flagged. A sudden change can mean the incoming data has changed |
+| `precision` | Of the flagged transactions with a known outcome, the share that was fraud |
+| `recall` | Of the fraud cases with a known outcome, the share that was flagged |
+| `lastRetraining` | The latest scheduled retraining since the start, see below |
+
+> [!NOTE]
+> This is a PoC implementation. Decisions and outcomes are kept in memory, at most 10,000 decisions wait for an outcome, and everything starts again when the application restarts or a new model is activated. Each outcome is accepted once. A production system would store decisions and outcomes durably, handle labels that arrive late, and alert when the numbers drift.
+
+### Scheduled retraining
+
+Retraining only helps when the model can learn from **new labelled data**. Retraining on the same data produces a similar model. Scheduled retraining is off by default. Turn it on with a Spring cron expression, for example every day at 03:00:
+
+```yaml
+fraud:
+  retraining:
+    cron: "0 0 3 * * *"
+```
+
+To watch it during a demo, start the application with a short schedule, for example every two minutes:
+
+```bash
+FRAUD_RETRAINING_CRON="0 */2 * * * *" mvn spring-boot:run
+```
+
+Each run:
+
+1. **Loads the training data again.** With `csv`, add the newly labelled transactions to the file before the run. With `synthetic`, each run generates a new data set with the next seed, which stands in for newly collected data.
+2. **Trains a new model** in the background. The active model keeps serving.
+3. **Compares both models on the same rows:** the new model's test split. The new model replaces the active one only if its PR AUC is at most `fraud.retraining.quality-tolerance` (0.01) lower. Otherwise the active model and its file stay unchanged.
+4. **Reports the result** in the log and as `lastRetraining` in `GET /api/monitoring`.
+
+With `csv` data the active model may have trained on some of those test rows, which favors it. The comparison is therefore conservative: a new model has to be clearly not worse to replace it.
+
+`POST /api/model/train` with `{"overwrite":true}` is different: it replaces the model on request without this comparison.
+
 ## Configuration & Customization
 
 ### Configuration
@@ -465,6 +541,8 @@ Settings live in `src/main/resources/application.yml`.
 | `fraud.training.learning-rate` | `0.001` | Learning rate |
 | `fraud.training.l2-regularization` | `0.0001` | L2 regularization |
 | `fraud.training.seed` | `42` | Random seed |
+| `fraud.retraining.cron` | `-` | Schedule for retraining as a Spring cron expression. `-` turns it off |
+| `fraud.retraining.quality-tolerance` | `0.01` | How much lower the new model's PR AUC may be than the active model's, on the same rows, and still replace it |
 
 Settings are checked at startup. An invalid value, such as a `test-fraction` of 2, stops the application with a message naming the setting. For a model folder outside the project, give `fraud.model.dir` an absolute path, because a relative path that starts with `../` also stops startup.
 
@@ -545,7 +623,8 @@ This is a PoC for local use, not a production service.
 - **Metrics describe synthetic data.** They are not evidence of real-world performance, and fraud scores are not calibrated probabilities.
 - **Strict input.** Every model input must be present, so a transaction with an unknown value cannot be scored.
 - **Retraining is synchronous.** The request stays open until training finishes.
-- **Monitoring is minimal.** Counters are kept in memory and reset on restart, and there is no drift detection.
+- **Monitoring is a PoC.** Counters, decisions and outcomes are kept in memory and reset on restart or with a new model. There is no drift detection or alerting.
+- **Retraining needs new labelled data.** Scheduled retraining reads the configured data again. With real data, someone has to add newly labelled transactions to the CSV file, for example from the reported outcomes.
 - **Error details.** Validation errors list every invalid field. A value of the wrong JSON type, such as text for `hourOfDay`, reports only that one field, because parsing stops there.
 - **CSV options.** `samples` and `fraudRate` are ignored without a warning when the source is `csv`, and `timestamp` is not validated because it is never read.
 - **A test gap.** The `422` from `POST /api/model/train` for unusable training data is tested with a mocked service. A real unusable file is tested through the service and at startup, not through the full HTTP path.
