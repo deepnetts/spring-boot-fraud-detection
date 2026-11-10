@@ -49,7 +49,7 @@ flowchart TD
 | Step | Code | What happens |
 |---|---|---|
 | Validation | `FraudDetectionController`, `Transaction` | Checks the 16 required model inputs and their ranges. An invalid request gets a `400` and no score |
-| Feature extraction | `FeatureExtractor` | Turns the 16 inputs into 27 numeric features |
+| Feature extraction | `FeatureExtractor` | Turns the 16 inputs into a tensor of 27 numeric features |
 | Scaling | `FeatureScaler` | Applies z-score standardization with the statistics saved with the model |
 | Neural network | `FraudModel`, Deep Netts `FeedForwardNetwork` | Returns a fraud score between 0 and 1 |
 | Fraud assessment | `FraudDetectionService`, `FraudAssessment` | Compares the score with the threshold, sets the risk level, adds the risk indicators and counts the result |
@@ -57,7 +57,7 @@ flowchart TD
 
 Risk indicators do not come from the network. `RiskIndicators` applies fixed rules to the original transaction.
 
-Training shares the same feature code. `FraudModelTrainer` loads the data, splits it, fits the scaler on the training split, trains the network and evaluates it. `ModelRepository` then saves the result as one file. That file holds the network's weights and biases, the scaler and the metrics.
+Training, evaluation and prediction use the same encoder. `FeatureExtractor` implements the small generic `TensorEncoder` interface, and `FraudModel.encoder(scaler)` adds the scaler fitted on the training split. `FraudModelTrainer` loads the data, splits it, fits the scaler on the training split, trains the network and evaluates it. `ModelRepository` then saves the result as one file. That file holds the network's weights and biases, the scaler and the metrics.
 
 | Package | Responsibility |
 |---|---|
@@ -603,7 +603,7 @@ Run `grep -rn "TODO(customize)" src` to find the main places to adapt.
 
 | Location | What to adapt |
 |---|---|
-| `FeatureExtractor` | Features. Change `FEATURE_NAMES` and `extract()` together, then retrain |
+| `FeatureExtractor` | Features. Change `FEATURE_NAMES` and `toTensor()` together, then retrain |
 | `MerchantCategory` | Merchant categories. This changes the features, so retrain |
 | `CsvTransactionReader` | CSV columns, kept in step with `Transaction` |
 | `SyntheticTransactionGenerator` | The assumed mix of fraud patterns |

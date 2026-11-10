@@ -17,8 +17,10 @@ import com.example.frauddetection.data.CsvTransactionReader;
 import com.example.frauddetection.data.SyntheticTransactionGenerator;
 import com.example.frauddetection.data.TrainingDataException;
 import com.example.frauddetection.domain.LabeledTransaction;
+import com.example.frauddetection.domain.Transaction;
 import com.example.frauddetection.features.FeatureExtractor;
 import com.example.frauddetection.features.FeatureScaler;
+import com.example.frauddetection.features.TensorEncoder;
 
 import deepnetts.data.DataSetItem;
 import deepnetts.data.MLDataItem;
@@ -28,6 +30,7 @@ import deepnetts.net.layers.activation.ActivationType;
 import deepnetts.net.loss.LossType;
 import deepnetts.net.train.BackpropagationTrainer;
 import deepnetts.net.train.opt.OptimizerType;
+import deepnetts.tensor.Tensor1D;
 
 /**
  * Trains a feed-forward network (ReLU hidden layers, sigmoid output, binary cross-entropy)
@@ -76,9 +79,9 @@ public class FraudModelTrainer {
         requireBothClasses("test", split.test(), data);
         List<LabeledTransaction> train = split.train();
 
-        List<float[]> trainFeatures = train.stream().map(t -> FeatureExtractor.extract(t.transaction())).toList();
-        FeatureScaler scaler = FeatureScaler.fit(trainFeatures);
-        TabularDataSet<MLDataItem> trainingSet = toDataSet(train, trainFeatures, scaler);
+        // the scaling is fitted on the training split only, then the same encoder serves training, evaluation and the API
+        FeatureScaler scaler = FeatureScaler.fit(train.stream().map(t -> FraudModel.FEATURES.toTensor(t.transaction())).toList());
+        TabularDataSet<MLDataItem> trainingSet = toDataSet(train, FraudModel.encoder(scaler));
 
         FeedForwardNetwork network = buildNetwork(cfg.hiddenLayers(), cfg.seed());
         BackpropagationTrainer trainer = network.getTrainer();
@@ -175,15 +178,16 @@ public class FraudModelTrainer {
     }
 
     /** The training split at its natural fraud rate: fraud rows are not duplicated or reweighted. */
-    private static TabularDataSet<MLDataItem> toDataSet(List<LabeledTransaction> train, List<float[]> features,
-            FeatureScaler scaler) {
+    private static TabularDataSet<MLDataItem> toDataSet(List<LabeledTransaction> train,
+            TensorEncoder<Transaction, Tensor1D> encoder) {
         TabularDataSet<MLDataItem> dataSet = new TabularDataSet<>(FeatureExtractor.NUM_FEATURES, 1);
         List<String> columns = new ArrayList<>(FeatureExtractor.FEATURE_NAMES);
         columns.add("fraud");
         dataSet.setColumnNames(columns.toArray(String[]::new));
 
-        for (int i = 0; i < train.size(); i++) {
-            dataSet.add(new DataSetItem(scaler.transform(features.get(i)), new float[] {train.get(i).fraud() ? 1 : 0}));
+        for (LabeledTransaction t : train) {
+            // float values: new Tensor1D(int) would create an empty tensor of that size
+            dataSet.add(new DataSetItem(encoder.toTensor(t.transaction()), new Tensor1D(t.fraud() ? 1f : 0f)));
         }
         dataSet.shuffle();
         return dataSet;

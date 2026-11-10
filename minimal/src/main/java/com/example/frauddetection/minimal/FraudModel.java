@@ -21,11 +21,15 @@ import org.springframework.stereotype.Component;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Locale;
+import java.util.stream.Stream;
 
 /**
  * The complete machine learning workflow, one method per step:
  * {@link #loadData} → {@link #train} → {@link #evaluate} → {@link #save} / {@link #load} → {@link #predict}.
+ * Training, evaluation and prediction all turn transactions into network inputs with the same {@link #ENCODER}.
  *
  * <p>On startup the saved network is loaded, or a new one is trained and saved if there is none.
  * Either way it is then evaluated on transactions it has never seen.
@@ -35,10 +39,12 @@ public class FraudModel {
 
     private static final Logger log = LoggerFactory.getLogger(FraudModel.class);
 
-    /** The nine inputs, in CSV column order, followed by the two outputs. */
-    static final String[] COLUMNS = {"amount", "customerAvgAmount", "hourOfDay", "distanceFromHomeKm",
-            "transactionsLast24h", "failedAttemptsLast24h", "online", "newDevice", "foreign", "legitimate", "fraud"};
-    static final int INPUTS = 9;
+    /** Turns a transaction into the network's inputs, see {@link TransactionEncoder}. */
+    static final TensorEncoder<TransactionRequest, Tensor1D> ENCODER = new TransactionEncoder();
+    static final int INPUTS = TransactionEncoder.FEATURE_NAMES.size();
+    /** The inputs, in CSV column order, followed by the two outputs. */
+    static final String[] COLUMNS = Stream.concat(TransactionEncoder.FEATURE_NAMES.stream(),
+            Stream.of("legitimate", "fraud")).toArray(String[]::new);
     /** Position of the fraud output. The network has two outputs, legitimate and fraud, that sum to 1. */
     static final int FRAUD = 1;
 
@@ -76,15 +82,31 @@ public class FraudModel {
 
     // ---- Step 1: data - read labelled transactions from a CSV file ----
 
-    /** Reads the CSV file and turns its 0/1 fraud column into the two outputs the network learns. */
-    static TabularDataSet<MLDataItem> loadData(Path csvFile) throws IOException {
+    /** A transaction with its known outcome. */
+    record LabeledTransaction(TransactionRequest transaction, boolean fraud) {
+    }
+
+    /** Reads the CSV file. Each row becomes the same {@link TransactionRequest} that the REST endpoint receives. */
+    static List<LabeledTransaction> loadData(Path csvFile) throws IOException {
         TabularDataSet<MLDataItem> rows = DataSets.readCsv(csvFile.toFile(), INPUTS, 1, true, ",");
+        List<LabeledTransaction> transactions = new ArrayList<>();
+        for (MLDataItem row : rows) {
+            float[] v = row.getInput().getValues();
+            TransactionRequest transaction = new TransactionRequest((double) v[0], (double) v[1], (int) v[2],
+                    (double) v[3], (int) v[4], (int) v[5], v[6] == 1f, v[7] == 1f, v[8] == 1f);
+            transactions.add(new LabeledTransaction(transaction, row.getTargetOutput().getValues()[0] == 1f));
+        }
+        return transactions;
+    }
+
+    /** Encodes each transaction and turns its outcome into the two outputs the network learns. */
+    static TabularDataSet<MLDataItem> toDataSet(List<LabeledTransaction> transactions) {
         TabularDataSet<MLDataItem> data = new TabularDataSet<>(INPUTS, 2);
         // required: Deep Netts uses the output column names as class labels and fails without them
         data.setColumnNames(COLUMNS);
-        for (MLDataItem row : rows) {
-            boolean fraud = row.getTargetOutput().getValues()[0] == 1f;
-            data.add(new DataSetItem(row.getInput().getValues().clone(), fraud ? new float[]{0, 1} : new float[]{1, 0}));
+        for (LabeledTransaction t : transactions) {
+            data.add(new DataSetItem(ENCODER.toTensor(t.transaction()),
+                    t.fraud() ? new Tensor1D(0f, 1f) : new Tensor1D(1f, 0f)));
         }
         return data;
     }
@@ -92,7 +114,8 @@ public class FraudModel {
     // ---- Step 2: preprocessing and training ----
 
     /** Scales the inputs, then trains a network with 9 inputs, one hidden layer and two outputs. */
-    static FeedForwardNetwork train(TabularDataSet<MLDataItem> trainingSet) {
+    static FeedForwardNetwork train(List<LabeledTransaction> trainingData) {
+        TabularDataSet<MLDataItem> trainingSet = toDataSet(trainingData);
         // each input gets mean 0 and standard deviation 1, measured on the training data only
         Standardizer scaler = new Standardizer(trainingSet);
         scaler.apply(trainingSet);
@@ -122,14 +145,14 @@ public class FraudModel {
     // ---- Step 3: evaluation on transactions the network has never seen ----
 
     /** Counts right and wrong answers on the test set, flagging a transaction when its score reaches the threshold. */
-    static Evaluation evaluate(FeedForwardNetwork network, TabularDataSet<MLDataItem> testSet, double threshold) {
+    static Evaluation evaluate(FeedForwardNetwork network, List<LabeledTransaction> testSet, double threshold) {
         int truePositives = 0;
         int falsePositives = 0;
         int falseNegatives = 0;
         int trueNegatives = 0;
-        for (MLDataItem row : testSet) {
-            boolean flagged = fraudScore(network, row.getInput().getValues()) >= threshold;
-            boolean fraud = row.getTargetOutput().getValues()[FRAUD] == 1f;
+        for (LabeledTransaction t : testSet) {
+            boolean flagged = fraudScore(network, ENCODER.toTensor(t.transaction())) >= threshold;
+            boolean fraud = t.fraud();
             if (flagged && fraud) {
                 truePositives++;
             } else if (flagged) {
@@ -158,33 +181,20 @@ public class FraudModel {
     // ---- Step 5: prediction - used by the REST endpoint ----
 
     public FraudPrediction predict(TransactionRequest transaction) {
-        double score = score(toInputs(transaction));
+        double score = score(ENCODER.toTensor(transaction));
         return new FraudPrediction(score, score >= threshold, threshold);
     }
 
-    /** The request fields as numbers, in the same order as the CSV columns. */
-    static float[] toInputs(TransactionRequest t) {
-        return new float[]{
-                t.amount().floatValue(),
-                t.customerAvgAmount().floatValue(),
-                t.hourOfDay(),
-                t.distanceFromHomeKm().floatValue(),
-                t.transactionsLast24h(),
-                t.failedAttemptsLast24h(),
-                t.online() ? 1 : 0,
-                t.newDevice() ? 1 : 0,
-                t.foreign() ? 1 : 0};
-    }
-
     /** A Deep Netts network keeps intermediate results in its layers, so one prediction at a time. */
-    private synchronized double score(float[] inputs) {
+    private synchronized double score(Tensor1D inputs) {
         return fraudScore(network, inputs);
     }
 
     /** Returns the network's fraud output for unscaled inputs. The network applies its stored scaling itself. */
-    static float fraudScore(FeedForwardNetwork network, float[] inputs) {
+    static float fraudScore(FeedForwardNetwork network, Tensor1D inputs) {
+        // the network scales the tensor it gets in place, so it gets a copy and the caller's inputs stay unscaled.
         // predict(Tensor) also works on a network loaded from a file; predict(float[]) does not in Deep Netts 4.0.4
-        return network.predict(Tensor1D.of(inputs.clone())).getValues()[FRAUD];
+        return network.predict(inputs.copy()).getValues()[FRAUD];
     }
 
     /**

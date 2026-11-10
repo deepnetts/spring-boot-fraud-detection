@@ -101,7 +101,7 @@ one method per step:
 
 | Step                | Method          | Description                                                                                      |
 |---------------------|-----------------|--------------------------------------------------------------------------------------------------|
-| 1. Data             | `loadData`      | Reads a CSV file with Deep Netts `DataSets.readCsv` and turns the 0/1 `fraud` column into two outputs, legitimate and fraud |
+| 1. Data             | `loadData`      | Reads a CSV file with Deep Netts `DataSets.readCsv`. Each row becomes the same `TransactionRequest` that the REST endpoint receives, with its 0/1 `fraud` label |
 | 2. Training         | `train`         | Scales each input with a Deep Netts `Standardizer`, then trains a network 9 → 16 (ReLU) → 2 (softmax) with cross-entropy loss and the Adam optimizer for 30 epochs |
 | 3. Evaluation       | `evaluate`      | Counts correct and wrong answers on test transactions the network has never seen                  |
 | 4. Saving / loading | `save` / `load` | Writes and reads the network, including its scaler, with Deep Netts `FileIO`                       |
@@ -109,6 +109,11 @@ one method per step:
 
 On startup, `FraudModel` loads the saved network if the file exists. Otherwise it trains and saves a new one. In both
 cases it then logs an evaluation.
+
+**One encoder for every step.** [`TransactionEncoder`](src/main/java/com/example/frauddetection/minimal/TransactionEncoder.java)
+turns a `TransactionRequest` into a Deep Netts `Tensor1D` with the nine inputs in CSV column order. It implements the
+small generic `TensorEncoder` interface. Training, evaluation and prediction all use the same `FraudModel.ENCODER`, so
+the inputs always line up. For training, each label also becomes two outputs, legitimate and fraud.
 
 **Why scaling matters.** The inputs have very different ranges: an amount can be in the thousands, while `online` is 0
 or 1. The `Standardizer` gives every input a mean of 0 and a standard deviation of 1, measured on the training data
@@ -129,14 +134,17 @@ src/main/java/com/example/frauddetection/minimal/
 ├── FraudController.java             REST endpoint
 ├── TransactionRequest.java          Request record with validation
 ├── FraudPrediction.java             Response record
+├── TensorEncoder.java               Generic interface: business record to Deep Netts tensor
+├── TransactionEncoder.java          Turns a TransactionRequest into the network's nine inputs
 └── FraudModel.java                  Machine learning workflow
 ```
 
 Recommended reading order:
 1. `TransactionRequest` and `FraudPrediction`
 2. `FraudController`
-3. `FraudModel`
-4. `data/train.csv`
+3. `TransactionEncoder`
+4. `FraudModel`
+5. `data/train.csv`
 
 ## Training Data
 
@@ -192,8 +200,8 @@ Delete the `model` directory after any change to the data, inputs or training, s
   recent transactions in `test.csv`. Keep the test data out of training and tuning.
 - **Change the inputs:**
   1. Add or remove the column in both CSV files.
-  2. Update `TransactionRequest`, `FraudModel.toInputs` and `FraudModel.COLUMNS`, in the same order as the CSV columns.
-  3. Update `FraudModel.INPUTS`.
+  2. Update `TransactionRequest` and `TransactionEncoder` (`FEATURE_NAMES` and `toTensor`), in the same order as the
+     CSV columns. The network's input size and column names follow from `FEATURE_NAMES`.
 - **Change the threshold:** set `fraud.threshold` in `application.properties`.
 - **Tune training:** the hidden layer size, learning rate and number of epochs are set in `FraudModel.train`. Compare
   settings on part of the training data, not on `test.csv`.
@@ -206,8 +214,9 @@ mvn test
 
 The tests check that:
 - the CSV files are read with the expected rows, values and labels;
+- the encoder puts the fields in the order of the CSV columns;
 - the model catches fraud with better than "flag nothing" accuracy on the test data;
-- the network scales raw inputs with its stored scaler;
+- the network scales raw inputs with its stored scaler, and scoring leaves the caller's inputs unscaled;
 - a saved and reloaded model gives identical scores;
 - the REST endpoint flags the suspicious example, accepts the ordinary one and rejects invalid input.
 

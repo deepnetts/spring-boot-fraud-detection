@@ -7,15 +7,17 @@ import java.util.List;
 import com.example.frauddetection.domain.MerchantCategory;
 import com.example.frauddetection.domain.Transaction;
 
+import deepnetts.tensor.Tensor1D;
+
 /**
- * Turns a {@link Transaction} into the numeric feature vector fed to the neural network.
+ * Turns a {@link Transaction} into the feature tensor of the neural network, in the order of {@link #FEATURE_NAMES}.
  * <p>
  * Heavy-tailed quantities (amounts, distances, time gaps) are log-transformed, the hour is
  * encoded cyclically so 23:00 and 00:00 end up close together, and the merchant category is
- * one-hot encoded. The resulting vector is standardised by {@link FeatureScaler} before training
- * and inference.
+ * one-hot encoded. The features are not scaled here: each model scales them with the {@link FeatureScaler}
+ * fitted on its training data, see {@code FraudModel#encoder}.
  */
-public final class FeatureExtractor {
+public final class FeatureExtractor implements TensorEncoder<Transaction, Tensor1D> {
 
     private static final MerchantCategory[] CATEGORIES = MerchantCategory.values();
 
@@ -48,11 +50,9 @@ public final class FeatureExtractor {
 
     public static final int NUM_FEATURES = FEATURE_NAMES.size();
 
-    private FeatureExtractor() {
-    }
-
     // TODO(customize): add, remove or change features here and in FEATURE_NAMES, in the same order, then retrain
-    public static float[] extract(Transaction tx) {
+    @Override
+    public Tensor1D toTensor(Transaction tx) {
         float[] f = new float[NUM_FEATURES];
         double hourAngle = 2 * Math.PI * tx.hourOfDay() / 24.0;
         int i = 0;
@@ -74,7 +74,7 @@ public final class FeatureExtractor {
         f[i++] = flag(tx.newDevice());
         f[i++] = flag(tx.newMerchant());
         f[i + tx.merchantCategory().ordinal()] = 1;
-        return f;
+        return Tensor1D.of(f);
     }
 
     public static boolean isNight(int hourOfDay) {

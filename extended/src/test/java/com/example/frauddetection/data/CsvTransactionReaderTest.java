@@ -26,6 +26,9 @@ import com.example.frauddetection.features.FeatureExtractor;
 
 class CsvTransactionReaderTest {
 
+    private static final FeatureExtractor FEATURES = new FeatureExtractor();
+
+
     private static final String HEADER = "amount,customerAvgAmount,hourOfDay,merchantCategory,distanceFromHomeKm,"
             + "distanceFromLastTransactionKm,minutesSinceLastTransaction,transactionsLast24h,failedAttemptsLast24h,"
             + "accountAgeDays,cardNotPresent,usedChip,usedPin,foreignTransaction,newDevice,newMerchant,fraud";
@@ -96,7 +99,8 @@ class CsvTransactionReaderTest {
 
         assertEquals(generated, read);
         for (int i = 0; i < generated.size(); i++) {
-            assertArrayEquals(FeatureExtractor.extract(generated.get(i).transaction()), FeatureExtractor.extract(read.get(i).transaction()));
+            assertArrayEquals(FEATURES.toTensor(generated.get(i).transaction()).getValues(),
+                    FEATURES.toTensor(read.get(i).transaction()).getValues());
         }
     }
 

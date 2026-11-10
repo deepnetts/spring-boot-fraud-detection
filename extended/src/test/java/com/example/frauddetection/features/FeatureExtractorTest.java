@@ -9,6 +9,8 @@ import org.junit.jupiter.api.Test;
 import com.example.frauddetection.domain.MerchantCategory;
 import com.example.frauddetection.domain.Transaction;
 
+import deepnetts.tensor.Tensor1D;
+
 class FeatureExtractorTest {
 
     @Test
@@ -16,7 +18,7 @@ class FeatureExtractorTest {
         var tx = new Transaction("t1", 300.0, 100.0, 0, MerchantCategory.ELECTRONICS,
                 0.0, 0.0, 0.0, 5, 1, 0, true, false, false, true, true, false);
 
-        float[] f = FeatureExtractor.extract(tx);
+        float[] f = new FeatureExtractor().toTensor(tx).getValues();
 
         assertEquals(FeatureExtractor.NUM_FEATURES, f.length);
         assertEquals(Math.log1p(300), f[index("log_amount")], 1e-5);
@@ -33,9 +35,9 @@ class FeatureExtractorTest {
 
     @Test
     void scalerStandardisesAndLeavesConstantColumnsFinite() {
-        var scaler = FeatureScaler.fit(List.of(new float[] {1, 5}, new float[] {3, 5}));
+        var scaler = FeatureScaler.fit(List.of(new Tensor1D(1f, 5f), new Tensor1D(3f, 5f)));
 
-        float[] scaled = scaler.transform(new float[] {3, 5});
+        float[] scaled = scaler.transform(new Tensor1D(3f, 5f)).getValues();
 
         assertEquals(1, scaled[0], 1e-6);
         assertEquals(0, scaled[1], 1e-6);

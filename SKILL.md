@@ -15,7 +15,7 @@ changing before you start.
 |---------------------------|-----------------------------------------------------------|-------------------------------------------------------------|
 | Request record            | `TransactionRequest`                                      | `domain/Transaction`                                        |
 | Training and test data    | `data/train.csv`, `data/test.csv`                         | `data/SyntheticTransactionGenerator`, `data/CsvTransactionReader` |
-| Preprocessing             | `FraudModel.toInputs`, Deep Netts `Standardizer`          | `features/FeatureExtractor`, `features/FeatureScaler`       |
+| Preprocessing             | `TransactionEncoder` (a `TensorEncoder`), Deep Netts `Standardizer` | `features/FeatureExtractor` (a `TensorEncoder`), `features/FeatureScaler` |
 | Training and evaluation   | `FraudModel.train`, `FraudModel.evaluate`                 | `model/FraudModelTrainer`, `model/ModelEvaluator`           |
 | Saving and loading        | `FraudModel.save`, `FraudModel.load` (Deep Netts `FileIO`) | `model/ModelRepository`, `model/NetworkParameters`          |
 | Prediction and REST API   | `FraudModel.predict`, `FraudController`                   | `service/FraudDetectionService`, `web/FraudDetectionController` |
@@ -26,9 +26,11 @@ changing before you start.
 ## Rules
 
 1. **Inputs must line up.** Every input must be in the same position for training and prediction.
-   - Minimal: the CSV columns, `FraudModel.COLUMNS`, `FraudModel.INPUTS`, `FraudModel.toInputs` and
+   - Training, evaluation and prediction turn a record into a tensor with the same `TensorEncoder`. Do not build
+     input tensors by hand.
+   - Minimal: the CSV columns, `TransactionEncoder.FEATURE_NAMES`, `TransactionEncoder.toTensor` and
      `TransactionRequest` must agree.
-   - Extended: `FeatureExtractor.FEATURE_NAMES` and `FeatureExtractor.extract` must agree. A saved model records its
+   - Extended: `FeatureExtractor.FEATURE_NAMES` and `FeatureExtractor.toTensor` must agree. A saved model records its
      feature names and is rejected at startup if they changed.
 2. **Keep the test data independent.** Never train on the test data, and never choose settings or a threshold by
    looking at test results.
@@ -58,8 +60,7 @@ changing before you start.
 
 1. List the customer's fields and decide, for each one, whether it is known at the moment of payment. Fields known
    only later, such as a chargeback, must not become inputs.
-2. Minimal: update both CSV files, `TransactionRequest`, `FraudModel.COLUMNS`, `FraudModel.INPUTS` and
-   `FraudModel.toInputs`.
+2. Minimal: update both CSV files, `TransactionRequest` and `TransactionEncoder`.
 3. Extended: update `Transaction`, `FeatureExtractor`, `CsvTransactionReader`, `SyntheticTransactionGenerator` and
    `docs/DATA_CONTRACT.md`. Section 9 of the data contract lists every step.
 4. Update `requests.http`, the README request tables and the tests. Delete the saved model.
