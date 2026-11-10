@@ -14,5 +14,5 @@ import deepnetts.tensor.TensorBase;
 @FunctionalInterface
 public interface TensorEncoder<R, T extends TensorBase> {
 
-    T toTensor(R record);
+    T encodeToTensor(R record);
 }

@@ -53,12 +53,12 @@ public final class FraudModel implements AutoCloseable {
      * its training data. Training, evaluation and prediction all use it.
      */
     public static TensorEncoder<Transaction, Tensor1D> encoder(FeatureScaler scaler) {
-        return transaction -> scaler.transform(FEATURES.toTensor(transaction));
+        return transaction -> scaler.transform(FEATURES.encodeToTensor(transaction));
     }
 
     /** Fraud score in [0, 1]: higher means more suspicious. It is not a calibrated probability. */
     public float predict(Transaction transaction) {
-        Tensor1D input = encoder.toTensor(transaction);
+        Tensor1D input = encoder.encodeToTensor(transaction);
         // the network keeps per-layer activations as state, so inference must not run concurrently
         synchronized (network) {
             // not predict(float...): it relies on a transient field that is null after loading from file

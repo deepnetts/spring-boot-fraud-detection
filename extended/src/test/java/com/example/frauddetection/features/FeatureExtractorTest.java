@@ -18,7 +18,7 @@ class FeatureExtractorTest {
         var tx = new Transaction("t1", 300.0, 100.0, 0, MerchantCategory.ELECTRONICS,
                 0.0, 0.0, 0.0, 5, 1, 0, true, false, false, true, true, false);
 
-        float[] f = new FeatureExtractor().toTensor(tx).getValues();
+        float[] f = new FeatureExtractor().encodeToTensor(tx).getValues();
 
         assertEquals(FeatureExtractor.NUM_FEATURES, f.length);
         assertEquals(Math.log1p(300), f[index("log_amount")], 1e-5);

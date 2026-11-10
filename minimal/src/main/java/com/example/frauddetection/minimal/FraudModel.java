@@ -105,7 +105,7 @@ public class FraudModel {
         // required: Deep Netts uses the output column names as class labels and fails without them
         data.setColumnNames(COLUMNS);
         for (LabeledTransaction t : transactions) {
-            data.add(new DataSetItem(ENCODER.toTensor(t.transaction()),
+            data.add(new DataSetItem(ENCODER.encodeToTensor(t.transaction()),
                     t.fraud() ? new Tensor1D(0f, 1f) : new Tensor1D(1f, 0f)));
         }
         return data;
@@ -151,7 +151,7 @@ public class FraudModel {
         int falseNegatives = 0;
         int trueNegatives = 0;
         for (LabeledTransaction t : testSet) {
-            boolean flagged = fraudScore(network, ENCODER.toTensor(t.transaction())) >= threshold;
+            boolean flagged = fraudScore(network, ENCODER.encodeToTensor(t.transaction())) >= threshold;
             boolean fraud = t.fraud();
             if (flagged && fraud) {
                 truePositives++;
@@ -181,7 +181,7 @@ public class FraudModel {
     // ---- Step 5: prediction - used by the REST endpoint ----
 
     public FraudPrediction predict(TransactionRequest transaction) {
-        double score = score(ENCODER.toTensor(transaction));
+        double score = score(ENCODER.encodeToTensor(transaction));
         return new FraudPrediction(score, score >= threshold);
     }
 

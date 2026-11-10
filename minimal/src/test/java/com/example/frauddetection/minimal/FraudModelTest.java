@@ -39,7 +39,7 @@ class FraudModelTest {
         assertThat(data).hasSize(7500);
         assertThat(data.stream().filter(FraudModel.LabeledTransaction::fraud)).hasSize(225);
         // first row of train.csv: 63.89,36.74,15,0.03,1,1,0,0,0,0
-        assertThat(FraudModel.ENCODER.toTensor(data.get(0).transaction()).getValues())
+        assertThat(FraudModel.ENCODER.encodeToTensor(data.get(0).transaction()).getValues())
                 .containsExactly(63.89f, 36.74f, 15f, 0.03f, 1f, 1f, 0f, 0f, 0f);
         assertThat(data.get(0).fraud()).isFalse();
     }
@@ -81,14 +81,14 @@ class FraudModelTest {
             network.setNormalizer(scaler);
         }
         for (int i = 0; i < raw.size(); i++) {
-            Tensor1D inputs = FraudModel.ENCODER.toTensor(raw.get(i).transaction());
+            Tensor1D inputs = FraudModel.ENCODER.encodeToTensor(raw.get(i).transaction());
             assertThat(FraudModel.fraudScore(network, inputs)).isEqualTo(withoutStoredScaler[i]);
         }
     }
 
     @Test
     void scoringLeavesTheInputsUnscaled() {
-        Tensor1D inputs = FraudModel.ENCODER.toTensor(SUSPICIOUS);
+        Tensor1D inputs = FraudModel.ENCODER.encodeToTensor(SUSPICIOUS);
         float[] before = inputs.getValues().clone();
 
         float first = FraudModel.fraudScore(network, inputs);
@@ -104,15 +104,15 @@ class FraudModelTest {
         FeedForwardNetwork loaded = FraudModel.load(file);
 
         for (FraudModel.LabeledTransaction t : FraudModel.loadData(TEST_DATA)) {
-            Tensor1D inputs = FraudModel.ENCODER.toTensor(t.transaction());
+            Tensor1D inputs = FraudModel.ENCODER.encodeToTensor(t.transaction());
             assertThat(FraudModel.fraudScore(loaded, inputs)).isEqualTo(FraudModel.fraudScore(network, inputs));
         }
     }
 
     @Test
     void scoresASuspiciousTransactionAboveAnOrdinaryOne() {
-        float suspicious = FraudModel.fraudScore(network, FraudModel.ENCODER.toTensor(SUSPICIOUS));
-        float ordinary = FraudModel.fraudScore(network, FraudModel.ENCODER.toTensor(ORDINARY));
+        float suspicious = FraudModel.fraudScore(network, FraudModel.ENCODER.encodeToTensor(SUSPICIOUS));
+        float ordinary = FraudModel.fraudScore(network, FraudModel.ENCODER.encodeToTensor(ORDINARY));
 
         assertThat(suspicious).isGreaterThan(0.5f);
         assertThat(ordinary).isLessThan(0.5f);

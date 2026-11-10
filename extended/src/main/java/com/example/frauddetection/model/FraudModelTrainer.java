@@ -80,7 +80,9 @@ public class FraudModelTrainer {
         List<LabeledTransaction> train = split.train();
 
         // the scaling is fitted on the training split only, then the same encoder serves training, evaluation and the API
-        FeatureScaler scaler = FeatureScaler.fit(train.stream().map(t -> FraudModel.FEATURES.toTensor(t.transaction())).toList());
+        FeatureScaler scaler = FeatureScaler.fit(train.stream()
+                .map(t -> FraudModel.FEATURES.encodeToTensor(t.transaction()))
+                .toList());
         TabularDataSet<MLDataItem> trainingSet = toDataSet(train, FraudModel.encoder(scaler));
 
         FeedForwardNetwork network = buildNetwork(cfg.hiddenLayers(), cfg.seed());
@@ -166,7 +168,7 @@ public class FraudModelTrainer {
 
         for (LabeledTransaction t : train) {
             // float values: new Tensor1D(int) would create an empty tensor of that size
-            dataSet.add(new DataSetItem(encoder.toTensor(t.transaction()), new Tensor1D(t.fraud() ? 1f : 0f)));
+            dataSet.add(new DataSetItem(encoder.encodeToTensor(t.transaction()), new Tensor1D(t.fraud() ? 1f : 0f)));
         }
         dataSet.shuffle();
         return dataSet;

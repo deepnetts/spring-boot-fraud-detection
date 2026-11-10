@@ -199,8 +199,8 @@ Delete the `model` directory after any change to the data, inputs or training, s
   recent transactions in `test.csv`. Keep the test data out of training and tuning.
 - **Change the inputs:**
   1. Add or remove the column in both CSV files.
-  2. Update `TransactionRequest` and `TransactionEncoder` (`FEATURE_NAMES` and `toTensor`), in the same order as the
-     CSV columns. The network's input size and column names follow from `FEATURE_NAMES`.
+  2. Update `TransactionRequest` and `TransactionEncoder` (`FEATURE_NAMES` and `encodeToTensor`), in the same order
+     as the CSV columns. The network's input size and column names follow from `FEATURE_NAMES`.
 - **Change the threshold:** set `fraud.threshold` in `application.properties`.
 - **Tune training:** the hidden layer size, learning rate and number of epochs are set in `FraudModel.train`. Compare
   settings on part of the training data, not on `test.csv`.

@@ -52,7 +52,7 @@ public final class FeatureExtractor implements TensorEncoder<Transaction, Tensor
 
     // TODO(customize): add, remove or change features here and in FEATURE_NAMES, in the same order, then retrain
     @Override
-    public Tensor1D toTensor(Transaction tx) {
+    public Tensor1D encodeToTensor(Transaction tx) {
         float[] f = new float[NUM_FEATURES];
         double hourAngle = 2 * Math.PI * tx.hourOfDay() / 24.0;
         int i = 0;

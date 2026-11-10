@@ -99,8 +99,8 @@ class CsvTransactionReaderTest {
 
         assertEquals(generated, read);
         for (int i = 0; i < generated.size(); i++) {
-            assertArrayEquals(FEATURES.toTensor(generated.get(i).transaction()).getValues(),
-                    FEATURES.toTensor(read.get(i).transaction()).getValues());
+            assertArrayEquals(FEATURES.encodeToTensor(generated.get(i).transaction()).getValues(),
+                    FEATURES.encodeToTensor(read.get(i).transaction()).getValues());
         }
     }
 

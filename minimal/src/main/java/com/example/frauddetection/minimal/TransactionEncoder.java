@@ -17,7 +17,7 @@ public class TransactionEncoder implements TensorEncoder<TransactionRequest, Ten
             "distanceFromHomeKm", "transactionsLast24h", "failedAttemptsLast24h", "online", "newDevice", "foreign");
 
     @Override
-    public Tensor1D toTensor(TransactionRequest t) {
+    public Tensor1D encodeToTensor(TransactionRequest t) {
         return new Tensor1D(
                 t.amount().floatValue(),
                 t.customerAvgAmount().floatValue(),

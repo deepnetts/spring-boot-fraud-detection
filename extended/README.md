@@ -592,7 +592,7 @@ Run `grep -rn "TODO(customize)" src` to find the main places to adapt.
 
 | Location | What to adapt |
 |---|---|
-| `FeatureExtractor` | Features. Change `FEATURE_NAMES` and `toTensor()` together, then retrain |
+| `FeatureExtractor` | Features. Change `FEATURE_NAMES` and `encodeToTensor()` together, then retrain |
 | `MerchantCategory` | Merchant categories. This changes the features, so retrain |
 | `CsvTransactionReader` | CSV columns, kept in step with `Transaction` |
 | `SyntheticTransactionGenerator` | The assumed mix of fraud patterns |

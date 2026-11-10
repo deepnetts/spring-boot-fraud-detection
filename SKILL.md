@@ -28,10 +28,10 @@ changing before you start.
 1. **Inputs must line up.** Every input must be in the same position for training and prediction.
    - Training, evaluation and prediction turn a record into a tensor with the same `TensorEncoder`. Do not build
      input tensors by hand.
-   - Minimal: the CSV columns, `TransactionEncoder.FEATURE_NAMES`, `TransactionEncoder.toTensor` and
+   - Minimal: the CSV columns, `TransactionEncoder.FEATURE_NAMES`, `TransactionEncoder.encodeToTensor` and
      `TransactionRequest` must agree.
-   - Extended: `FeatureExtractor.FEATURE_NAMES` and `FeatureExtractor.toTensor` must agree. A saved model records its
-     feature names and is rejected at startup if they changed.
+   - Extended: `FeatureExtractor.FEATURE_NAMES` and `FeatureExtractor.encodeToTensor` must agree. A saved model
+     records its feature names and is rejected at startup if they changed.
 2. **Keep the test data independent.** Never train on the test data, and never choose settings or a threshold by
    looking at test results.
    - Minimal: `data/test.csv` is for evaluation only. Compare settings on part of `data/train.csv`.

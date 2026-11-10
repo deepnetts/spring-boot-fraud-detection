@@ -262,7 +262,7 @@ the pipeline works. They are not evidence of real-world performance.
 
 To change the features, edit `FeatureExtractor` and retrain:
 
-1. Change `FEATURE_NAMES` and `toTensor()` together. They must stay in the same order, because the vector
+1. Change `FEATURE_NAMES` and `encodeToTensor()` together. They must stay in the same order, because the vector
    is built by position and nothing checks the alignment.
 2. If you add or remove a `Transaction` field, update `Transaction`, `SyntheticTransactionGenerator`,
    `CsvTransactionReader` and
