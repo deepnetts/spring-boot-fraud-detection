@@ -10,7 +10,7 @@ Check in particular:
 1. Training and prediction use the same inputs in the same order and the same preprocessing.
 2. The test data is unchanged and independent of all training data and of every setting that was chosen.
 3. Missing values are rejected, not replaced with defaults.
-4. The Deep Netts 4.0.4 workarounds are still in place.
+4. The Deep Netts workarounds listed in `SKILL.md` are still in place.
 5. Tests cover the change, and `mvn test` passes.
 6. The evaluation before and after the change, measured on the same test data.
 7. The README and requests.http match the new behavior, and every number in them was measured.

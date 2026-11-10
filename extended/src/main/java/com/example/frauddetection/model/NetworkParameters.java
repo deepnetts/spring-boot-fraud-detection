@@ -12,10 +12,10 @@ import deepnetts.tensor.TensorBase;
 /**
  * Trained weights and biases of every layer (null for layers without them, e.g. the input layer).
  * <p>
- * Used instead of {@code NeuralNetwork.save/load}: in Deep Netts 4.0.4 a loaded
- * {@link FeedForwardNetwork} has uninitialised transient fields (input tensor, output layer
- * forward implementation) and fails on the first prediction. Rebuilding the same architecture and
- * copying the parameters in avoids that.
+ * Used instead of {@code FileIO}: in Deep Netts 4.0.4 a {@link FeedForwardNetwork} with a sigmoid output
+ * fails on its first prediction after loading, because transient fields (input tensor, output layer
+ * forward implementation) are not initialised. Rebuilding the same architecture and copying the parameters
+ * in avoids that. Deep Netts 4.0.5 fixes the loading, and this format is kept so saved models still load.
  */
 public record NetworkParameters(List<float[]> weights, List<float[]> biases) implements Serializable {
 

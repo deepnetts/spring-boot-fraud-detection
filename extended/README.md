@@ -2,7 +2,7 @@
 
 A Java proof of concept that scores card transactions for fraud through a REST API, using a feed-forward neural network trained with [Deep Netts](https://www.deepnetts.com). This extended example covers the full machine learning lifecycle. For the smallest complete integration, start with the [minimal example](../minimal/README.md). The [repository README](../README.md) compares the two.
 
-**Built with:** Java 25, Spring Boot 4.0, Deep Netts 4.0.4 (`com.deepnetts:deepnetts-core`) and Maven.
+**Built with:** Java 25, Spring Boot 4.0, Deep Netts 4.0.5 (`com.deepnetts:deepnetts-core`) and Maven.
 
 **Contents:** [Overview](#overview) · [Architecture](#architecture) · [Key Features](#key-features) · [Quick Start](#quick-start) · [API Usage](#api-usage) · [Model Training & Evaluation](#model-training--evaluation) · [Full Demo Walkthrough](#full-demo-walkthrough) · [Monitoring & Retraining](#monitoring--retraining) · [Configuration & Customization](#configuration--customization) · [Known Limitations](#known-limitations)
 

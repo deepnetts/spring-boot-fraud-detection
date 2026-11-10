@@ -193,7 +193,7 @@ public class FraudModel {
     /** Returns the network's fraud output for unscaled inputs. The network applies its stored scaling itself. */
     static float fraudScore(FeedForwardNetwork network, Tensor1D inputs) {
         // the network scales the tensor it gets in place, so it gets a copy and the caller's inputs stay unscaled.
-        // predict(Tensor) also works on a network loaded from a file; predict(float[]) does not in Deep Netts 4.0.4
+        // predict(Tensor) also works on a network loaded from a file; predict(float[]) does not in Deep Netts 4.0.5
         return network.predict(inputs.copy()).getValues()[FRAUD];
     }
 

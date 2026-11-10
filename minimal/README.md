@@ -221,15 +221,16 @@ The tests check that:
 
 The tests take about 30 seconds.
 
-## Deep Netts 4.0.4 Notes
+## Deep Netts Notes
+
+Checked on Deep Netts 4.0.5. Models saved with 4.0.4 load and give identical scores.
 
 - `network.setNormalizer(scaler)` stores the scaler in the network, and `network.predict` then scales its input
-  itself. Pass unscaled inputs to `predict`; scaling them first would scale them twice.
-- A network with a single sigmoid output fails with a `NullPointerException` after it is loaded with `FileIO`. This
-  example uses two softmax outputs, which load correctly. The extended example keeps one sigmoid output and saves the
-  network's weights in its own file format instead.
-- `FeedForwardNetwork.predict(float[])` fails on a network loaded from a file. Use
-  `network.predict(Tensor1D.of(inputs))`.
+  itself, in place. Pass unscaled inputs to `predict`; scaling them first would scale them twice. `FraudModel.fraudScore`
+  passes a copy, so the caller's tensor stays unscaled.
+- `FeedForwardNetwork.predict(float[])` fails on a network loaded from a file. Use `network.predict(Tensor1D)`.
+- In Deep Netts 4.0.4 a network with a single sigmoid output failed after it was loaded with `FileIO`; 4.0.5 fixes
+  this. This example uses two softmax outputs, which load correctly in both versions.
 - `TabularDataSet.setColumnNames(...)` is required before training.
 - Training uses one thread (`DeepNetts.getInstance().setMaxThreads(1)`, a JVM-wide setting), which is faster for a
   network this small.

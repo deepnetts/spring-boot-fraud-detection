@@ -18,7 +18,7 @@ changing before you start.
 | Preprocessing             | `TransactionEncoder` (a `TensorEncoder`), Deep Netts `Standardizer` | `features/FeatureExtractor` (a `TensorEncoder`), `features/FeatureScaler` |
 | Training and evaluation   | `FraudModel.train`, `FraudModel.evaluate`                 | `model/FraudModelTrainer`, `model/ModelEvaluator`           |
 | Saving and loading        | `FraudModel.save`, `FraudModel.load` (Deep Netts `FileIO`) | `model/ModelRepository`, `model/NetworkParameters`          |
-| Prediction and REST API   | `FraudModel.predict`, `FraudController`                   | `service/FraudDetectionService`, `web/FraudDetectionController` |
+| Prediction and REST API   | `FraudModel.predict`, `FraudController`                   | `service/FraudDetectionService`, `service/ActiveModel`, `web/FraudDetectionController` |
 | Monitoring and retraining | not included                                              | `service/PerformanceMonitor`, `FraudDetectionService.retrainIfBetter` |
 | Configuration             | `application.properties`                                  | `application.yml`, `config/FraudProperties`                 |
 | Field definitions         | `TransactionRequest` Javadoc                              | `docs/DATA_CONTRACT.md`                                     |
@@ -44,12 +44,13 @@ changing before you start.
    - Minimal: delete `minimal/model/`. The example does not detect an outdated model.
    - Extended: move `fraud-model.bin` out of `extended/model/`. Startup stops with a message if the saved features no
      longer match.
-6. **Keep the Deep Netts 4.0.4 workarounds.**
-   - Predict with `network.predict(Tensor1D.of(inputs))`, not `predict(float[])`.
+6. **Keep the Deep Netts workarounds** (checked on 4.0.5).
+   - Predict with `network.predict(Tensor1D)`, not `predict(float[])`, which still fails on a loaded network.
    - Set `TabularDataSet.setColumnNames(...)` before training.
-   - Minimal: keep two softmax outputs. A single sigmoid output fails after loading with `FileIO`. The network
-     stores its `Standardizer` (`setNormalizer`) and scales inputs itself, so pass unscaled inputs to `predict`.
-   - Extended: keep the sigmoid output with `ModelRepository` and `NetworkParameters`. Do not switch it to `FileIO`.
+   - Minimal: the network stores its `Standardizer` (`setNormalizer`) and scales its input tensor itself, in place.
+     Pass unscaled inputs, and give `predict` a copy so the caller's tensor stays unchanged (`FraudModel.fraudScore`).
+   - Extended: keep the sigmoid output with `ModelRepository` and `NetworkParameters`. Do not switch it to `FileIO`:
+     that changes the model file format, so saved models would no longer load.
 7. **Report results honestly.** Results on synthetic data are simulation results, not real-world performance.
    `fraudScore` is not a calibrated probability. Every number in a README must be measured. Do not commit trained
    models (`*.dnet`, `fraud-model.bin`) or build output.

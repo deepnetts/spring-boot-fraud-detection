@@ -85,7 +85,7 @@ public final class FraudModel implements AutoCloseable {
             if (network.getThreadPool() != null) {
                 network.getThreadPool().shutdownNow();
             }
-            // close() only frees the CUDA memory arena and throws when CUDA isn't in use (Deep Netts 4.0.4)
+            // close() only frees the CUDA memory arena and throws when CUDA isn't in use (Deep Netts 4.0.4 and 4.0.5)
             if (DeepNetts.getInstance().useCuda()) {
                 network.close();
             }

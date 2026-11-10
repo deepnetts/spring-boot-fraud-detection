@@ -20,7 +20,7 @@
     <properties>
         <!-- Deep Netts 4.x is compiled for Java 25 -->
         <java.version>25</java.version>
-        <deepnetts.version>4.0.4</deepnetts.version>
+        <deepnetts.version>4.0.5</deepnetts.version>
     </properties>
 
     <dependencies>
