@@ -257,7 +257,7 @@ class FraudDetectionServiceTest {
     }
 
     @Test
-    void countsAssessmentsByRiskLevel() {
+    void countsAssessmentsByDecision() {
         saveExistingModel();
         FraudDetectionService service = service(false);
         service.run(null);
@@ -267,7 +267,7 @@ class FraudDetectionServiceTest {
             FraudAssessment assessment = service.assess(TRANSACTION);
             service.assess(TRANSACTION);
 
-            assertEquals(2, registry.get("fraud.assessments").tag("risk", assessment.riskLevel().name()).counter().count());
+            assertEquals(2, registry.get("fraud.assessments").tag("fraud", String.valueOf(assessment.fraud())).counter().count());
         } finally {
             Metrics.removeRegistry(registry);
         }

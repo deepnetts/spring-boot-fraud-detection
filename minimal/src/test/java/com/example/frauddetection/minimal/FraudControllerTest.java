@@ -39,7 +39,7 @@ class FraudControllerTest {
                  "transactionsLast24h": 11, "failedAttemptsLast24h": 3, "online": true, "newDevice": true, "foreign": true}""")
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.fraud").value(true))
-                .andExpect(jsonPath("$.threshold").value(0.5));
+                .andExpect(jsonPath("$.threshold").doesNotExist());
     }
 
     @Test

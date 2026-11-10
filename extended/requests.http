@@ -7,7 +7,7 @@ GET http://localhost:8080/api/data/summary
 ### Model information and evaluation on the test split (synthetic data)
 GET http://localhost:8080/api/model
 
-### Score a suspicious transaction -> expected fraud: true, riskLevel CRITICAL
+### Score a suspicious transaction -> expected fraud: true
 POST http://localhost:8080/api/transactions/assess
 Content-Type: application/json
 
@@ -17,7 +17,7 @@ Content-Type: application/json
  "cardNotPresent": true, "usedChip": false, "usedPin": false, "foreignTransaction": true, "newDevice": true,
  "newMerchant": true}
 
-### Score an ordinary transaction -> expected fraud: false, riskLevel LOW
+### Score an ordinary transaction -> expected fraud: false
 POST http://localhost:8080/api/transactions/assess
 Content-Type: application/json
 
@@ -72,8 +72,8 @@ Content-Type: application/json
 ### Monitoring: alert rate, outcomes, precision and recall of the active model, and the last scheduled retraining
 GET http://localhost:8080/api/monitoring
 
-### Scoring counter for one risk level (returns 404 until a CRITICAL transaction has been scored since the start)
-GET http://localhost:8080/actuator/metrics/fraud.assessments?tag=risk:CRITICAL
+### Scoring counter for flagged transactions (returns 404 until one has been scored since the start)
+GET http://localhost:8080/actuator/metrics/fraud.assessments?tag=fraud:true
 
 ### Application health, including the model status
 GET http://localhost:8080/actuator/health

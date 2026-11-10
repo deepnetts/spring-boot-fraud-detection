@@ -95,7 +95,8 @@ class FraudDetectionApplicationTest {
         mvc.perform(post("/api/transactions/assess").contentType(MediaType.APPLICATION_JSON).content(ORDINARY))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.fraud").value(false))
-                .andExpect(jsonPath("$.riskLevel").value("LOW"));
+                .andExpect(jsonPath("$.riskLevel").doesNotExist())
+                .andExpect(jsonPath("$.threshold").doesNotExist());
     }
 
     @Test

@@ -77,10 +77,10 @@ abstract class WorkflowAcceptanceTest {
                 .andExpect(jsonPath("$.transactionId").value("accept-1"))
                 .andExpect(jsonPath("$.fraudScore").isNumber())
                 .andReturn().getResponse().getContentAsString();
-        String riskLevel = JsonPath.read(assessment, "$.riskLevel");
+        boolean fraud = JsonPath.read(assessment, "$.fraud");
 
         // monitor
-        mvc.perform(get("/actuator/metrics/fraud.assessments").param("tag", "risk:" + riskLevel))
+        mvc.perform(get("/actuator/metrics/fraud.assessments").param("tag", "fraud:" + fraud))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.measurements[0].value").value(greaterThanOrEqualTo(1.0)));
 

@@ -182,7 +182,7 @@ public class FraudModel {
 
     public FraudPrediction predict(TransactionRequest transaction) {
         double score = score(ENCODER.toTensor(transaction));
-        return new FraudPrediction(score, score >= threshold, threshold);
+        return new FraudPrediction(score, score >= threshold);
     }
 
     /** A Deep Netts network keeps intermediate results in its layers, so one prediction at a time. */

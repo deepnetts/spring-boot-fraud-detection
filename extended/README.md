@@ -52,7 +52,7 @@ flowchart TD
 | Feature extraction | `FeatureExtractor` | Turns the 16 inputs into a tensor of 27 numeric features |
 | Scaling | `FeatureScaler` | Applies z-score standardization with the statistics saved with the model |
 | Neural network | `FraudModel`, Deep Netts `FeedForwardNetwork` | Returns a fraud score between 0 and 1 |
-| Fraud assessment | `FraudDetectionService`, `FraudAssessment` | Compares the score with the threshold, sets the risk level, adds the risk indicators and counts the result |
+| Fraud assessment | `FraudDetectionService`, `FraudAssessment` | Compares the score with the threshold, adds the risk indicators and counts the result |
 | Response | `FraudDetectionController` | Returns the assessment as JSON |
 
 Risk indicators do not come from the network. `RiskIndicators` applies fixed rules to the original transaction.
@@ -124,7 +124,7 @@ curl -X POST localhost:8080/api/transactions/assess -H "Content-Type: applicatio
 }'
 ```
 
-With the default demonstration setup (default settings, synthetic data, seed 42), expect a result like `"fraudScore":1.0,"fraud":true,"riskLevel":"CRITICAL"` with 9 risk indicators. Scores and metrics in this README come from that setup. They are examples, not guaranteed values, and a different model can give different results.
+With the default demonstration setup (default settings, synthetic data, seed 42), expect a result like `"fraudScore":1.0,"fraud":true` with 9 risk indicators. Scores and metrics in this README come from that setup. They are examples, not guaranteed values, and a different model can give different results.
 
 [API Usage](#api-usage) explains the response, and the [Full Demo Walkthrough](#full-demo-walkthrough) covers the rest of the system.
 
@@ -196,8 +196,6 @@ An example response from the default demonstration setup follows. The score depe
   "transactionId": "tx-1001",
   "fraudScore": 1.0,
   "fraud": true,
-  "riskLevel": "CRITICAL",
-  "threshold": 0.5,
   "riskIndicators": [
     "Amount is 55.6x the customer's average",
     "High velocity: 11 transactions in 24h",
@@ -228,18 +226,9 @@ The response is the same JSON that `curl` returns.
 | Field | Meaning |
 |---|---|
 | `fraudScore` | The network's output, from 0 to 1. Higher means more suspicious. Use it to rank transactions and compare them with a threshold. It is **not a calibrated probability**, so 0.8 does not mean an 80% chance of fraud |
-| `fraud` | `true` when `fraudScore` is at or above `threshold` |
-| `riskLevel` | A band derived from the score and the threshold (see below) |
-| `threshold` | The value of `fraud.model.threshold` |
+| `fraud` | The decision: `true` when `fraudScore` is at or above `fraud.model.threshold` |
 | `riskIndicators` | Rule-based red flags meant to help analysts. They do **not** explain the network's score |
 | `modelTrainedAt` | When the model that produced the score was trained |
-
-| `riskLevel` | Score range | At the default threshold of 0.5 |
-|---|---|---|
-| `LOW` | Below threshold ÷ 2 | Below 0.25 |
-| `MEDIUM` | From threshold ÷ 2 up to the threshold | 0.25 to below 0.5 |
-| `HIGH` | From the threshold up to (1 + threshold) ÷ 2 | 0.5 to below 0.75 |
-| `CRITICAL` | From (1 + threshold) ÷ 2 | 0.75 and above |
 
 ### Errors
 
@@ -380,7 +369,7 @@ curl localhost:8080/api/model
 
 Send the request from [step 3 of the Quick Start](#quick-start).
 
-**Expect** a `CRITICAL` result with risk indicators, as described there.
+**Expect** `"fraud":true` with risk indicators, as described there.
 
 ### 6. Score an ordinary transaction
 
@@ -397,7 +386,7 @@ curl -X POST localhost:8080/api/transactions/assess -H "Content-Type: applicatio
 }'
 ```
 
-**Expect** a score close to 0, `"fraud":false`, `"riskLevel":"LOW"` and no risk indicators.
+**Expect** a score close to 0, `"fraud":false` and no risk indicators.
 
 ### 7. Send an invalid request
 
@@ -409,10 +398,10 @@ curl -X POST localhost:8080/api/transactions/assess -H "Content-Type: applicatio
 
 ### 8. Check monitoring
 
-Scoring is counted by risk level, and health shows whether a model is loaded. Counters reset on restart, so the metric below returns `404` until a `CRITICAL` transaction has been scored since the last start.
+Scoring is counted by decision, and health shows whether a model is loaded. Counters reset on restart, so the metric below returns `404` until a flagged transaction has been scored since the last start.
 
 ```bash
-curl "localhost:8080/actuator/metrics/fraud.assessments?tag=risk:CRITICAL"
+curl "localhost:8080/actuator/metrics/fraud.assessments?tag=fraud:true"
 ```
 
 ```bash

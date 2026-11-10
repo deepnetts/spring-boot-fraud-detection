@@ -42,7 +42,7 @@ The application is a REST API. It has no graphical interface.
    Response:
 
    ```json
-   {"fraudScore": 1.0, "fraud": true, "threshold": 0.5}
+   {"fraudScore": 1.0, "fraud": true}
    ```
 
 More requests are in [`requests.http`](requests.http). You can run them from IntelliJ IDEA or VS Code, or use them as a
@@ -75,8 +75,7 @@ Returns a fraud score for one transaction.
 | Field        | Type    | Description                                                              |
 |--------------|---------|--------------------------------------------------------------------------|
 | `fraudScore` | number  | Score from 0 to 1. Higher means more suspicious                          |
-| `fraud`      | boolean | `true` when `fraudScore` is at or above `threshold`                      |
-| `threshold`  | number  | The decision threshold from `fraud.threshold` in `application.properties` |
+| `fraud`      | boolean | `true` when `fraudScore` is at or above `fraud.threshold` in `application.properties` |
 
 `fraudScore` ranks transactions and is compared with the threshold. It is not a calibrated probability: a score of
 0.8 does not mean an 80 % chance of fraud.

@@ -73,12 +73,10 @@ public class FraudDetectionService implements ApplicationRunner {
                     transaction.transactionId(),
                     score,
                     score >= threshold,
-                    FraudAssessment.RiskLevel.of(score, threshold),
-                    threshold,
                     RiskIndicators.of(transaction),
                     model.metadata().trainedAt());
         });
-        Metrics.counter("fraud.assessments", "risk", assessment.riskLevel().name()).increment();
+        Metrics.counter("fraud.assessments", "fraud", String.valueOf(assessment.fraud())).increment();
         monitor.recordAssessment(transaction.transactionId(), assessment.fraud());
         return assessment;
     }
