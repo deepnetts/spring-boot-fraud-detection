@@ -76,8 +76,7 @@ class FraudModelTrainerTest {
         try (FraudModel model = new FraudModelTrainer(properties).train(data, TRAINING)) {
             Split split = FraudModelTrainer.split(data, TRAINING);
             EvaluationReport report = model.metadata().evaluation();
-            double onValidation = ModelEvaluator.recommendThreshold(
-                    FraudModelTrainer.scores(model, split.validation()), FraudModelTrainer.labels(split.validation()));
+            double onValidation = ModelEvaluator.recommendThreshold(model, split.validation());
 
             assertEquals(onValidation, report.recommendedThreshold(), 1e-9);
             assertEquals(1000, report.testSamples());

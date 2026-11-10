@@ -98,20 +98,15 @@ public class FraudModelTrainer {
         network.train(trainingSet);
         double seconds = (System.nanoTime() - start) / 1e9;
 
-        ModelMetadata provisional = new ModelMetadata(Instant.now(), FeatureExtractor.FEATURE_NAMES, scaler,
-                cfg.hiddenLayers(), trainingSet.size(), trainer.getCurrentEpoch(), seconds, null);
-        FraudModel model = new FraudModel(network, provisional);
-        double recommendedThreshold = ModelEvaluator.recommendThreshold(scores(model, split.validation()),
-                labels(split.validation()));
-        EvaluationReport report = ModelEvaluator.evaluate(scores(model, split.test()), labels(split.test()), threshold,
-                recommendedThreshold);
+        FraudModel model = new FraudModel(network, new ModelMetadata(Instant.now(), FeatureExtractor.FEATURE_NAMES, scaler,
+                cfg.hiddenLayers(), trainingSet.size(), trainer.getCurrentEpoch(), seconds, null));
+        double recommendedThreshold = ModelEvaluator.recommendThreshold(model, split.validation());
+        EvaluationReport report = ModelEvaluator.evaluate(model, split.test(), threshold, recommendedThreshold);
         log.info("Trained in {}s. Test ROC AUC {}, PR AUC {}, precision {}, recall {} at threshold {}, recommended threshold {}",
                 String.format(Locale.ROOT, "%.1f", seconds), fmt(report.rocAuc()), fmt(report.prAuc()),
                 fmt(report.precision()), fmt(report.recall()), threshold, recommendedThreshold);
 
-        FraudModel trained = new FraudModel(network, new ModelMetadata(provisional.trainedAt(), provisional.featureNames(),
-                scaler, cfg.hiddenLayers(), trainingSet.size(), provisional.epochs(), seconds, report));
-        return new TrainingRun(trained, split.test());
+        return new TrainingRun(model.withEvaluation(report), split.test());
     }
 
     /**
@@ -146,22 +141,6 @@ public class FraudModelTrainer {
                     + " split needs both fraud and legitimate rows. The data has " + data.size() + " rows, "
                     + totalFrauds + " of them fraud.");
         }
-    }
-
-    static float[] scores(FraudModel model, List<LabeledTransaction> transactions) {
-        float[] scores = new float[transactions.size()];
-        for (int i = 0; i < scores.length; i++) {
-            scores[i] = model.predict(transactions.get(i).transaction());
-        }
-        return scores;
-    }
-
-    static boolean[] labels(List<LabeledTransaction> transactions) {
-        boolean[] labels = new boolean[transactions.size()];
-        for (int i = 0; i < labels.length; i++) {
-            labels[i] = transactions.get(i).fraud();
-        }
-        return labels;
     }
 
     static FeedForwardNetwork buildNetwork(List<Integer> hiddenLayers, long seed) {

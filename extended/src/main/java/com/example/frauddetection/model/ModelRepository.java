@@ -13,8 +13,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Optional;
 
 import org.slf4j.Logger;
@@ -22,7 +20,6 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import com.example.frauddetection.config.FraudProperties;
-import com.example.frauddetection.features.FeatureExtractor;
 import com.example.frauddetection.model.ModelLoadException.Reason;
 
 import deepnetts.net.FeedForwardNetwork;
@@ -125,19 +122,11 @@ public class ModelRepository {
     }
 
     private static void checkFeatures(SavedModel saved, Path path) {
-        List<String> savedNames = saved.metadata().featureNames();
-        if (savedNames.equals(FeatureExtractor.FEATURE_NAMES)) {
-            return;
+        try {
+            FraudModel.requireCurrentFeatures(saved.metadata().featureNames());
+        } catch (IllegalArgumentException e) {
+            throw new ModelLoadException(Reason.INCOMPATIBLE, path, e.getMessage(), null);
         }
-        List<String> added = new ArrayList<>(FeatureExtractor.FEATURE_NAMES);
-        added.removeAll(savedNames);
-        List<String> removed = new ArrayList<>(savedNames);
-        removed.removeAll(FeatureExtractor.FEATURE_NAMES);
-        throw new ModelLoadException(Reason.INCOMPATIBLE, path,
-                "it was trained with " + savedNames.size() + " features and the current FeatureExtractor has "
-                        + FeatureExtractor.NUM_FEATURES + ". Added: " + added + ". Removed: " + removed
-                        + (added.isEmpty() && removed.isEmpty() ? ". The feature order changed" : ""),
-                null);
     }
 
     private static void deleteTemporaryFile(Path tmp) {

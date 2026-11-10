@@ -16,7 +16,23 @@ public final class ModelEvaluator {
     private ModelEvaluator() {
     }
 
-    public static EvaluationReport evaluate(float[] scores, boolean[] labels, double threshold,
+    /** Evaluates a model on test data at the configured threshold and at the recommended one. */
+    public static EvaluationReport evaluate(FraudModel model, List<LabeledTransaction> testSet, double threshold,
+            double recommendedThreshold) {
+        return evaluate(scores(model, testSet), labels(testSet), threshold, recommendedThreshold);
+    }
+
+    /** The threshold with the best F1 on {@code validationSet}, see {@link #recommendThreshold(float[], boolean[])}. */
+    public static double recommendThreshold(FraudModel model, List<LabeledTransaction> validationSet) {
+        return recommendThreshold(scores(model, validationSet), labels(validationSet));
+    }
+
+    /** PR AUC of a model on labelled transactions, for comparing two models on the same rows. */
+    public static double prAuc(FraudModel model, List<LabeledTransaction> rows) {
+        return averagePrecision(scores(model, rows), labels(rows));
+    }
+
+    static EvaluationReport evaluate(float[] scores, boolean[] labels, double threshold,
             double recommendedThreshold) {
         ConfusionMatrix cm = confusionMatrix(scores, labels, threshold);
         ConfusionMatrix recommended = confusionMatrix(scores, labels, recommendedThreshold);
@@ -42,7 +58,7 @@ public final class ModelEvaluator {
      * The threshold with the best F1. Use validation data: choosing it on the test set would make the
      * reported test results look better than they are.
      */
-    public static double recommendThreshold(float[] scores, boolean[] labels) {
+    static double recommendThreshold(float[] scores, boolean[] labels) {
         double bestThreshold = 0.5;
         double bestF1 = -1;
         for (int i = 1; i < 100; i++) {
@@ -56,9 +72,20 @@ public final class ModelEvaluator {
         return bestThreshold;
     }
 
-    /** PR AUC of a model on labelled transactions, for comparing two models on the same rows. */
-    public static double prAuc(FraudModel model, List<LabeledTransaction> rows) {
-        return averagePrecision(FraudModelTrainer.scores(model, rows), FraudModelTrainer.labels(rows));
+    static float[] scores(FraudModel model, List<LabeledTransaction> transactions) {
+        float[] scores = new float[transactions.size()];
+        for (int i = 0; i < scores.length; i++) {
+            scores[i] = model.predict(transactions.get(i).transaction());
+        }
+        return scores;
+    }
+
+    static boolean[] labels(List<LabeledTransaction> transactions) {
+        boolean[] labels = new boolean[transactions.size()];
+        for (int i = 0; i < labels.length; i++) {
+            labels[i] = transactions.get(i).fraud();
+        }
+        return labels;
     }
 
     /**

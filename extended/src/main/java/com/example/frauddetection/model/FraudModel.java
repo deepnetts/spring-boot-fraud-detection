@@ -1,5 +1,8 @@
 package com.example.frauddetection.model;
 
+import java.util.ArrayList;
+import java.util.List;
+
 import com.example.frauddetection.domain.Transaction;
 import com.example.frauddetection.features.FeatureExtractor;
 import com.example.frauddetection.features.FeatureScaler;
@@ -22,13 +25,27 @@ public final class FraudModel implements AutoCloseable {
     private final TensorEncoder<Transaction, Tensor1D> encoder;
 
     public FraudModel(FeedForwardNetwork network, ModelMetadata metadata) {
-        if (!metadata.featureNames().equals(FeatureExtractor.FEATURE_NAMES)) {
-            throw new IllegalArgumentException(
-                    "Model was trained with different features " + metadata.featureNames());
-        }
+        requireCurrentFeatures(metadata.featureNames());
         this.network = network;
         this.metadata = metadata;
         this.encoder = encoder(metadata.scaler());
+    }
+
+    /**
+     * Throws if a model trained with {@code featureNames} can't read the features the current {@link FeatureExtractor}
+     * produces, naming what changed.
+     */
+    static void requireCurrentFeatures(List<String> featureNames) {
+        if (featureNames.equals(FeatureExtractor.FEATURE_NAMES)) {
+            return;
+        }
+        List<String> added = new ArrayList<>(FeatureExtractor.FEATURE_NAMES);
+        added.removeAll(featureNames);
+        List<String> removed = new ArrayList<>(featureNames);
+        removed.removeAll(FeatureExtractor.FEATURE_NAMES);
+        throw new IllegalArgumentException("it was trained with " + featureNames.size()
+                + " features and the current FeatureExtractor has " + FeatureExtractor.NUM_FEATURES + ". Added: " + added
+                + ". Removed: " + removed + (added.isEmpty() && removed.isEmpty() ? ". The feature order changed" : ""));
     }
 
     /**
@@ -47,6 +64,11 @@ public final class FraudModel implements AutoCloseable {
             // not predict(float...): it relies on a transient field that is null after loading from file
             return network.predict(input).getValues()[0];
         }
+    }
+
+    /** The same model with its evaluation results. It shares the network, so only one of the two is used and closed. */
+    FraudModel withEvaluation(EvaluationReport report) {
+        return new FraudModel(network, metadata.withEvaluation(report));
     }
 
     public FeedForwardNetwork network() {

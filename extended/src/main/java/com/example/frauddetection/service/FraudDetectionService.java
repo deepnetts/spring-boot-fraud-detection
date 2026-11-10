@@ -4,10 +4,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
-import java.util.concurrent.atomic.AtomicReference;
-import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantLock;
-import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -39,12 +36,8 @@ public class FraudDetectionService implements ApplicationRunner {
     private final FraudProperties properties;
     private final FraudModelTrainer trainer;
     private final ModelRepository repository;
-    private final AtomicReference<FraudModel> model = new AtomicReference<>();
+    private final ActiveModel activeModel = new ActiveModel();
     private final ReentrantLock trainingLock = new ReentrantLock();
-    // scoring holds the read lock, so a model can't be closed while a request is using it;
-    // fair, so a waiting swap can't be starved by constant scoring traffic
-    private final ReadWriteLock modelLock = new ReentrantReadWriteLock(true);
-    private boolean stopped; // guarded by modelLock
     private final PerformanceMonitor monitor = new PerformanceMonitor();
     private int retrainings; // guarded by trainingLock
     private volatile RetrainingResult lastRetraining;
@@ -74,26 +67,20 @@ public class FraudDetectionService implements ApplicationRunner {
 
     public FraudAssessment assess(Transaction transaction) {
         double threshold = properties.model().threshold();
-        FraudModel current;
-        double score;
-        modelLock.readLock().lock();
-        try {
-            current = currentModel();
-            score = current.predict(transaction);
-        } finally {
-            modelLock.readLock().unlock();
-        }
-        FraudAssessment.RiskLevel riskLevel = FraudAssessment.RiskLevel.of(score, threshold);
-        Metrics.counter("fraud.assessments", "risk", riskLevel.name()).increment();
-        monitor.recordAssessment(transaction.transactionId(), score >= threshold);
-        return new FraudAssessment(
-                transaction.transactionId(),
-                score,
-                score >= threshold,
-                riskLevel,
-                threshold,
-                RiskIndicators.of(transaction),
-                current.metadata().trainedAt());
+        FraudAssessment assessment = activeModel.use(model -> {
+            double score = model.predict(transaction);
+            return new FraudAssessment(
+                    transaction.transactionId(),
+                    score,
+                    score >= threshold,
+                    FraudAssessment.RiskLevel.of(score, threshold),
+                    threshold,
+                    RiskIndicators.of(transaction),
+                    model.metadata().trainedAt());
+        });
+        Metrics.counter("fraud.assessments", "risk", assessment.riskLevel().name()).increment();
+        monitor.recordAssessment(transaction.transactionId(), assessment.fraud());
+        return assessment;
     }
 
     public List<FraudAssessment> assessAll(List<Transaction> transactions) {
@@ -101,7 +88,7 @@ public class FraudDetectionService implements ApplicationRunner {
     }
 
     public ModelInfo modelInfo() {
-        return ModelInfo.of(currentModel().metadata(), properties.model().threshold());
+        return ModelInfo.of(activeModel.get().metadata(), properties.model().threshold());
     }
 
     /**
@@ -159,7 +146,7 @@ public class FraudDetectionService implements ApplicationRunner {
             return remember(new RetrainingResult(Instant.now(), false, null, null, "Skipped: training is already in progress"));
         }
         try {
-            if (model.get() == null) {
+            if (!activeModel.isLoaded()) {
                 return remember(new RetrainingResult(Instant.now(), false, null, null,
                         "Skipped: no model is loaded, so there is nothing to compare with"));
             }
@@ -168,19 +155,15 @@ public class FraudDetectionService implements ApplicationRunner {
             TrainingRun run = trainer.trainWithTestSet(trainer.loadData(cfg), cfg);
             FraudModel candidate = run.model();
             double candidatePrAuc = candidate.metadata().evaluation().prAuc();
-            double activePrAuc;
-            modelLock.readLock().lock();
-            try {
-                activePrAuc = stopped ? Double.NaN : ModelEvaluator.prAuc(model.get(), run.testSet());
-            } finally {
-                modelLock.readLock().unlock();
-            }
-            if (Double.isNaN(activePrAuc)) {
-                closeQuietly(candidate);
+            // both models are scored on the candidate's test split, so the comparison uses the same rows
+            Optional<Double> active = activeModel.useIfActive(model -> ModelEvaluator.prAuc(model, run.testSet()));
+            if (active.isEmpty()) {
+                ActiveModel.closeQuietly(candidate);
                 return remember(new RetrainingResult(Instant.now(), false, candidatePrAuc, null, "Skipped: shutting down"));
             }
+            double activePrAuc = active.get();
             if (candidatePrAuc < activePrAuc - properties.retraining().qualityTolerance()) {
-                closeQuietly(candidate);
+                ActiveModel.closeQuietly(candidate);
                 return remember(new RetrainingResult(Instant.now(), false, candidatePrAuc, activePrAuc, String.format(
                         Locale.ROOT, "Kept the active model: the new model's PR AUC %.4f is more than %.4f below %.4f",
                         candidatePrAuc, properties.retraining().qualityTolerance(), activePrAuc)));
@@ -188,7 +171,7 @@ public class FraudDetectionService implements ApplicationRunner {
             try {
                 repository.save(candidate, true);
             } catch (RuntimeException e) {
-                closeQuietly(candidate);
+                ActiveModel.closeQuietly(candidate);
                 throw e;
             }
             activate(candidate);
@@ -207,7 +190,7 @@ public class FraudDetectionService implements ApplicationRunner {
     }
 
     boolean modelLoaded() {
-        return model.get() != null;
+        return activeModel.isLoaded();
     }
 
     /** Describes the data a training run would use, from the configured source. */
@@ -234,7 +217,7 @@ public class FraudDetectionService implements ApplicationRunner {
             try {
                 repository.save(trained, overwrite);
             } catch (RuntimeException e) {
-                closeQuietly(trained);
+                ActiveModel.closeQuietly(trained);
                 throw e;
             }
             if (replacing) {
@@ -248,52 +231,15 @@ public class FraudDetectionService implements ApplicationRunner {
         }
     }
 
-    private FraudModel currentModel() {
-        FraudModel current = model.get();
-        if (current == null) {
-            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "No fraud model is loaded yet");
-        }
-        return current;
-    }
-
-    /** Waits for scoring in progress, so the model that gets closed can't still be in use. */
     private void activate(FraudModel next) {
-        FraudModel retired;
-        modelLock.writeLock().lock();
-        try {
-            // nothing would ever close a model activated after shutdown
-            retired = stopped ? next : model.getAndSet(next);
-        } finally {
-            modelLock.writeLock().unlock();
-        }
-        if (retired != next) {
+        if (activeModel.activate(next)) {
             // monitoring describes the active model, so it starts again with a new one
             monitor.reset();
         }
-        closeQuietly(retired);
     }
 
     @PreDestroy
     void shutdown() {
-        FraudModel retired;
-        modelLock.writeLock().lock();
-        try {
-            stopped = true;
-            retired = model.getAndSet(null);
-        } finally {
-            modelLock.writeLock().unlock();
-        }
-        closeQuietly(retired);
-    }
-
-    private static void closeQuietly(FraudModel model) {
-        if (model == null) {
-            return;
-        }
-        try {
-            model.close();
-        } catch (Exception e) {
-            log.warn("Failed to release model resources", e);
-        }
+        activeModel.stop();
     }
 }

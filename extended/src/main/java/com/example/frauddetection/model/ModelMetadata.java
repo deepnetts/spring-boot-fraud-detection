@@ -18,4 +18,9 @@ public record ModelMetadata(
         int epochs,
         double trainingSeconds,
         EvaluationReport evaluation) implements Serializable {
+
+    ModelMetadata withEvaluation(EvaluationReport report) {
+        return new ModelMetadata(trainedAt, featureNames, scaler, hiddenLayers, trainingSamples, epochs, trainingSeconds,
+                report);
+    }
 }
