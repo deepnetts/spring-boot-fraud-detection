@@ -1,4 +1,8 @@
-package com.example.frauddetection.minimal;
+package com.example.frauddetection.minimal.model;
+
+import com.example.frauddetection.minimal.domain.Transaction;
+import com.example.frauddetection.minimal.features.TensorEncoder;
+import com.example.frauddetection.minimal.features.TransactionEncoder;
 
 import deepnetts.core.DeepNetts;
 import deepnetts.data.DataSetItem;
@@ -40,7 +44,7 @@ public class FraudModel {
     private static final Logger log = LoggerFactory.getLogger(FraudModel.class);
 
     /** Turns a transaction into the network's inputs, see {@link TransactionEncoder}. */
-    static final TensorEncoder<TransactionRequest, Tensor1D> ENCODER = new TransactionEncoder();
+    static final TensorEncoder<Transaction, Tensor1D> ENCODER = new TransactionEncoder();
     static final int INPUTS = TransactionEncoder.FEATURE_NAMES.size();
     /** The inputs, in CSV column order, followed by the two outputs. */
     static final String[] COLUMNS = Stream.concat(TransactionEncoder.FEATURE_NAMES.stream(),
@@ -83,16 +87,16 @@ public class FraudModel {
     // ---- Step 1: data - read labelled transactions from a CSV file ----
 
     /** A transaction with its known outcome. */
-    record LabeledTransaction(TransactionRequest transaction, boolean fraud) {
+    record LabeledTransaction(Transaction transaction, boolean fraud) {
     }
 
-    /** Reads the CSV file. Each row becomes the same {@link TransactionRequest} that the REST endpoint receives. */
+    /** Reads the CSV file. Each row becomes the same {@link Transaction} that the REST endpoint receives. */
     static List<LabeledTransaction> loadData(Path csvFile) throws IOException {
         TabularDataSet<MLDataItem> rows = DataSets.readCsv(csvFile.toFile(), INPUTS, 1, true, ",");
         List<LabeledTransaction> transactions = new ArrayList<>();
         for (MLDataItem row : rows) {
             float[] v = row.getInput().getValues();
-            TransactionRequest transaction = new TransactionRequest((double) v[0], (double) v[1], (int) v[2],
+            Transaction transaction = new Transaction((double) v[0], (double) v[1], (int) v[2],
                     (double) v[3], (int) v[4], (int) v[5], v[6] == 1f, v[7] == 1f, v[8] == 1f);
             transactions.add(new LabeledTransaction(transaction, row.getTargetOutput().getValues()[0] == 1f));
         }
@@ -180,7 +184,7 @@ public class FraudModel {
 
     // ---- Step 5: prediction - used by the REST endpoint ----
 
-    public FraudPrediction predict(TransactionRequest transaction) {
+    public FraudPrediction predict(Transaction transaction) {
         double score = score(ENCODER.encodeToTensor(transaction));
         return new FraudPrediction(score, score >= threshold);
     }

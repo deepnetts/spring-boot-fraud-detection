@@ -13,22 +13,22 @@ changing before you start.
 
 | Concern                   | `minimal/` (package `com.example.frauddetection.minimal`) | `extended/` (package `com.example.frauddetection`)          |
 |---------------------------|-----------------------------------------------------------|-------------------------------------------------------------|
-| Request record            | `TransactionRequest`                                      | `domain/Transaction`                                        |
+| Transaction record        | `domain/Transaction`                                      | `domain/Transaction`                                        |
 | Training and test data    | `data/train.csv`, `data/test.csv`                         | `data/SyntheticTransactionGenerator`, `data/CsvTransactionReader` |
-| Preprocessing             | `TransactionEncoder` (a `TensorEncoder`), Deep Netts `Standardizer` | `features/FeatureExtractor` (a `TensorEncoder`), `features/FeatureScaler` |
-| Training and evaluation   | `FraudModel.train`, `FraudModel.evaluate`                 | `model/FraudModelTrainer`, `model/ModelEvaluator`           |
-| Saving and loading        | `FraudModel.save`, `FraudModel.load` (Deep Netts `FileIO`) | `model/ModelRepository` (the Deep Netts network and its metadata) |
-| Prediction and REST API   | `FraudModel.predict`, `FraudController`                   | `service/FraudDetectionService`, `service/ActiveModel`, `web/FraudDetectionController` |
+| Preprocessing             | `features/TransactionEncoder` (a `TensorEncoder`), Deep Netts `Standardizer` | `features/FeatureExtractor` (a `TensorEncoder`), `features/FeatureScaler` |
+| Training and evaluation   | `model/FraudModel.train`, `FraudModel.evaluate`           | `model/FraudModelTrainer`, `model/ModelEvaluator`           |
+| Saving and loading        | `model/FraudModel.save`, `FraudModel.load` (Deep Netts `FileIO`) | `model/ModelRepository` (the Deep Netts network and its metadata) |
+| Prediction and REST API   | `model/FraudModel.predict`, `web/FraudController`         | `service/FraudDetectionService`, `service/ActiveModel`, `web/FraudDetectionController` |
 | Monitoring and retraining | not included                                              | `service/PerformanceMonitor`, `FraudDetectionService.retrainIfBetter` |
 | Configuration             | `application.properties`                                  | `application.yml`, `config/FraudProperties`                 |
-| Field definitions         | `TransactionRequest` Javadoc                              | `docs/DATA_CONTRACT.md`                                     |
+| Field definitions         | `domain/Transaction` Javadoc                              | `docs/DATA_CONTRACT.md`                                     |
 
 ## Rules
 
 1. **Inputs must line up.** Every input must be in the same position for training and prediction.
    - Training, evaluation and prediction turn a record into a tensor with the same `TensorEncoder`. Do not build
      input tensors by hand.
-   - Minimal: the CSV columns, `TransactionRequest`, `FraudModel.loadData` (which builds a request from each CSV row),
+   - Minimal: the CSV columns, `Transaction`, `FraudModel.loadData` (which builds a request from each CSV row),
      `TransactionEncoder.FEATURE_NAMES` and `TransactionEncoder.encodeToTensor` must agree.
    - Extended: `FeatureExtractor.FEATURE_NAMES` and `FeatureExtractor.encodeToTensor` must agree. A saved model
      records its feature names and is rejected at startup if they changed.
@@ -64,7 +64,7 @@ changing before you start.
 
 1. List the customer's fields and decide, for each one, whether it is known at the moment of payment. Fields known
    only later, such as a chargeback, must not become inputs.
-2. Minimal: update both CSV files, `TransactionRequest`, `FraudModel.loadData` and `TransactionEncoder`.
+2. Minimal: update both CSV files, `Transaction`, `FraudModel.loadData` and `TransactionEncoder`.
 3. Extended: update `Transaction`, `FeatureExtractor`, `CsvTransactionReader`, `SyntheticTransactionGenerator` and
    `docs/DATA_CONTRACT.md`. Section 9 of the data contract lists every step.
 4. Update `requests.http`, the README request tables and the tests. Delete the saved model.
@@ -85,8 +85,8 @@ changing before you start.
 
 ### Integrate into an existing Spring Boot application
 
-1. Copy the model code and the request and response records. Minimal: `FraudModel`, `TensorEncoder` and
-   `TransactionEncoder`. Extended: `model/`, `features/` and `domain/`, plus the parts of `data/` and
+1. Copy the model code and the request and response records. Minimal: the `domain/`, `features/` and `model/`
+   packages. Extended: `model/`, `features/` and `domain/`, plus the parts of `data/` and
    `config/FraudProperties` that training uses. Keep the Deep Netts dependency version.
 2. Train offline or on startup, and load the saved model where the application needs it.
 3. Call the model from the existing service layer, not only from a new controller.

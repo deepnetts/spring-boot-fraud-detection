@@ -1,4 +1,6 @@
-package com.example.frauddetection.minimal;
+package com.example.frauddetection.minimal.features;
+
+import com.example.frauddetection.minimal.domain.Transaction;
 
 import org.junit.jupiter.api.Test;
 
@@ -17,7 +19,7 @@ class TransactionEncoderTest {
 
     @Test
     void encodesTheFieldsInFeatureOrder() {
-        var transaction = new TransactionRequest(950.0, 45.0, 3, 850.0, 11, 3, true, false, true);
+        var transaction = new Transaction(950.0, 45.0, 3, 850.0, 11, 3, true, false, true);
 
         assertThat(encoder.encodeToTensor(transaction).getValues())
                 .hasSize(TransactionEncoder.FEATURE_NAMES.size())
@@ -26,14 +28,14 @@ class TransactionEncoderTest {
 
     @Test
     void keepsVeryLargeAmountsInARangeTheNetworkHasSeen() {
-        var huge = new TransactionRequest(1e12, 45.0, 3, 850.0, 11, 3, true, false, true);
+        var huge = new Transaction(1e12, 45.0, 3, 850.0, 11, 3, true, false, true);
 
         assertThat(encoder.encodeToTensor(huge).getValues()[0]).isLessThan(30f);
     }
 
     @Test
-    void csvColumnsAreTheRequestFieldsInOrder() throws IOException {
-        List<String> fields = Stream.of(TransactionRequest.class.getRecordComponents())
+    void csvColumnsAreTheTransactionFieldsInOrder() throws IOException {
+        List<String> fields = Stream.of(Transaction.class.getRecordComponents())
                 .map(RecordComponent::getName).toList();
         for (String file : List.of("data/train.csv", "data/test.csv")) {
             String header = Files.readAllLines(Path.of(file)).get(0);

@@ -104,14 +104,14 @@ For example, `"amount": -5` and `"hourOfDay": 25` give:
 
 ## How It Works
 
-The machine learning workflow is in [`FraudModel`](src/main/java/com/example/frauddetection/minimal/FraudModel.java),
-with one method per step. [`TransactionEncoder`](src/main/java/com/example/frauddetection/minimal/TransactionEncoder.java)
+The machine learning workflow is in [`FraudModel`](src/main/java/com/example/frauddetection/minimal/model/FraudModel.java),
+with one method per step. [`TransactionEncoder`](src/main/java/com/example/frauddetection/minimal/features/TransactionEncoder.java)
 turns a transaction into the network's inputs for every step.
 
 
 | Step                | Method          | Description                                                                                      |
 |---------------------|-----------------|--------------------------------------------------------------------------------------------------|
-| 1. Data             | `loadData`      | Reads a CSV file with Deep Netts `DataSets.readCsv`. Each row becomes the same `TransactionRequest` that the REST endpoint receives, with its 0/1 `fraud` label |
+| 1. Data             | `loadData`      | Reads a CSV file with Deep Netts `DataSets.readCsv`. Each row becomes the same `Transaction` that the REST endpoint receives, with its 0/1 `fraud` label |
 | 2. Training         | `train`         | Scales each input with a Deep Netts `Standardizer`, then trains a network 9 → 16 (ReLU) → 2 (softmax) with cross-entropy loss and the Adam optimizer for 30 epochs |
 | 3. Evaluation       | `evaluate`      | Counts correct and wrong answers on test transactions the network has never seen                  |
 | 4. Saving / loading | `save` / `load` | Writes and reads the network, including its scaler, with Deep Netts `FileIO`                       |
@@ -120,7 +120,7 @@ turns a transaction into the network's inputs for every step.
 On startup, `FraudModel` loads the saved network if the file exists. Otherwise it trains and saves a new one. In both
 cases it then logs an evaluation.
 
-**One encoder for every step.** `TransactionEncoder` turns a `TransactionRequest` into a Deep Netts `Tensor1D` with
+**One encoder for every step.** `TransactionEncoder` turns a `Transaction` into a Deep Netts `Tensor1D` with
 the nine inputs in the order of `TransactionEncoder.FEATURE_NAMES`. It implements the small generic `TensorEncoder`
 interface. Training, evaluation and prediction all use the same `FraudModel.ENCODER`, so the inputs always line up. For
 training, each label also becomes two outputs, legitimate and fraud.
@@ -146,19 +146,26 @@ data/
 └── test.csv                         2,500 labelled transactions for evaluation
 src/main/java/com/example/frauddetection/minimal/
 ├── MinimalFraudApplication.java     Spring Boot entry point
-├── FraudController.java             REST endpoint
-├── TransactionRequest.java          Request record with validation
-├── FraudPrediction.java             Response record
-├── TensorEncoder.java               Generic interface: business record to Deep Netts tensor
-├── TransactionEncoder.java          Turns a TransactionRequest into the network's nine inputs
-└── FraudModel.java                  Machine learning workflow
+├── domain/
+│   └── Transaction.java             The transaction to score, with validation
+├── features/
+│   ├── TensorEncoder.java           Generic interface: business record to Deep Netts tensor
+│   └── TransactionEncoder.java      Turns a Transaction into the network's nine inputs
+├── model/
+│   ├── FraudModel.java              Machine learning workflow
+│   └── FraudPrediction.java         The model's answer: score and decision
+└── web/
+    └── FraudController.java         REST endpoint and error responses
 ```
 
+The packages follow the extended example: `domain` for the data, `features` for turning it into network inputs, `model`
+for the network, and `web` for the REST API.
+
 Recommended reading order:
-1. `TransactionRequest` and `FraudPrediction`
-2. `FraudController`
-3. `TransactionEncoder`
-4. `FraudModel`
+1. `domain/Transaction` and `model/FraudPrediction`
+2. `web/FraudController`
+3. `features/TransactionEncoder`
+4. `model/FraudModel`
 5. `data/train.csv`
 
 ## Training Data
@@ -215,8 +222,8 @@ Delete the `model` directory after any change to the data, inputs or training, s
   format: numeric columns, 1/0 for yes/no, and `fraud` as the last column. Split by time if you can, with the most
   recent transactions in `test.csv`. Keep the test data out of training and tuning.
 - **Change the inputs:**
-  1. Add or remove the column in both CSV files. The CSV columns are the `TransactionRequest` fields, in order.
-  2. Update `TransactionRequest`, `FraudModel.loadData` (it builds a `TransactionRequest` from each CSV row) and
+  1. Add or remove the column in both CSV files. The CSV columns are the `Transaction` fields, in order.
+  2. Update `Transaction`, `FraudModel.loadData` (it builds a `Transaction` from each CSV row) and
      `TransactionEncoder` (`FEATURE_NAMES` and `encodeToTensor`). The network's input size and column names follow
      from `FEATURE_NAMES`.
 - **Change the threshold:** set `fraud.threshold` in `application.properties`.
@@ -230,7 +237,7 @@ mvn test
 ```
 
 The tests check that:
-- the CSV files are read with the expected rows, values and labels, and their columns are the request fields;
+- the CSV files are read with the expected rows, values and labels, and their columns are the `Transaction` fields;
 - the encoder puts the fields in order and keeps very large amounts in range;
 - the model catches fraud with better than "flag nothing" accuracy on the test data;
 - a suspicious payment stays suspicious from €10,000 up to €1,000,000,000;

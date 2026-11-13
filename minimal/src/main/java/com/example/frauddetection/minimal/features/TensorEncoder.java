@@ -1,4 +1,4 @@
-package com.example.frauddetection.minimal;
+package com.example.frauddetection.minimal.features;
 
 import deepnetts.tensor.TensorBase;
 

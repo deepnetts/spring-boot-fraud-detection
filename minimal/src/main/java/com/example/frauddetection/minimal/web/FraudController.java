@@ -1,4 +1,8 @@
-package com.example.frauddetection.minimal;
+package com.example.frauddetection.minimal.web;
+
+import com.example.frauddetection.minimal.domain.Transaction;
+import com.example.frauddetection.minimal.model.FraudModel;
+import com.example.frauddetection.minimal.model.FraudPrediction;
 
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
@@ -24,7 +28,7 @@ public class FraudController {
 
     /** Scores one transaction. An invalid request gets a {@code 400} response and no score. */
     @PostMapping("/predict")
-    public FraudPrediction predict(@Valid @RequestBody TransactionRequest transaction) {
+    public FraudPrediction predict(@Valid @RequestBody Transaction transaction) {
         return model.predict(transaction);
     }
 

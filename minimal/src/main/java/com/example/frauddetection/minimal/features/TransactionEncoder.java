@@ -1,4 +1,6 @@
-package com.example.frauddetection.minimal;
+package com.example.frauddetection.minimal.features;
+
+import com.example.frauddetection.minimal.domain.Transaction;
 
 import deepnetts.tensor.Tensor1D;
 
@@ -14,14 +16,14 @@ import java.util.List;
  * <p>The values are not standardized here. The network does that itself with the {@code Standardizer} that training
  * stores in it, so the scaling is saved and loaded with the model file.
  */
-public class TransactionEncoder implements TensorEncoder<TransactionRequest, Tensor1D> {
+public class TransactionEncoder implements TensorEncoder<Transaction, Tensor1D> {
 
-    /** Input names in tensor order. The CSV columns are the {@link TransactionRequest} fields, in the same order. */
+    /** Input names in tensor order. The CSV columns are the {@link Transaction} fields, in the same order. */
     public static final List<String> FEATURE_NAMES = List.of("logAmount", "logCustomerAvgAmount", "hourOfDay",
             "logDistanceFromHomeKm", "transactionsLast24h", "failedAttemptsLast24h", "online", "newDevice", "foreign");
 
     @Override
-    public Tensor1D encodeToTensor(TransactionRequest t) {
+    public Tensor1D encodeToTensor(Transaction t) {
         return new Tensor1D(
                 log(t.amount()),
                 log(t.customerAvgAmount()),

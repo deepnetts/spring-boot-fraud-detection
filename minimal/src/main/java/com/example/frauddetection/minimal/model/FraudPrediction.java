@@ -1,4 +1,4 @@
-package com.example.frauddetection.minimal;
+package com.example.frauddetection.minimal.model;
 
 /**
  * The model's answer for one transaction.

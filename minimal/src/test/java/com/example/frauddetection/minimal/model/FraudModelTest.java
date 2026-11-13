@@ -1,4 +1,6 @@
-package com.example.frauddetection.minimal;
+package com.example.frauddetection.minimal.model;
+
+import com.example.frauddetection.minimal.domain.Transaction;
 
 import deepnetts.data.MLDataItem;
 import deepnetts.data.TabularDataSet;
@@ -20,10 +22,10 @@ class FraudModelTest {
     static final Path TRAINING_DATA = Path.of("data/train.csv");
     static final Path TEST_DATA = Path.of("data/test.csv");
 
-    static final TransactionRequest SUSPICIOUS =
-            new TransactionRequest(950.0, 45.0, 3, 850.0, 11, 3, true, true, true);
-    static final TransactionRequest ORDINARY =
-            new TransactionRequest(42.10, 55.0, 13, 3.2, 2, 0, false, false, false);
+    static final Transaction SUSPICIOUS =
+            new Transaction(950.0, 45.0, 3, 850.0, 11, 3, true, true, true);
+    static final Transaction ORDINARY =
+            new Transaction(42.10, 55.0, 13, 3.2, 2, 0, false, false, false);
 
     static FeedForwardNetwork network;
 
@@ -40,7 +42,7 @@ class FraudModelTest {
         assertThat(data.stream().filter(FraudModel.LabeledTransaction::fraud)).hasSize(225);
         // first row of train.csv: 63.89,36.74,15,0.03,1,1,0,0,0,0
         assertThat(data.get(0).transaction()).isEqualTo(
-                new TransactionRequest((double) 63.89f, (double) 36.74f, 15, (double) 0.03f, 1, 1, false, false, false));
+                new Transaction((double) 63.89f, (double) 36.74f, 15, (double) 0.03f, 1, 1, false, false, false));
         assertThat(data.get(0).fraud()).isFalse();
     }
 
@@ -121,7 +123,7 @@ class FraudModelTest {
     @Test
     void aVeryLargeSuspiciousPaymentStaysSuspicious() {
         for (double amount : new double[] {10_000, 100_000, 1_000_000, 1e9}) {
-            var payment = new TransactionRequest(amount, 45.0, 3, 850.0, 11, 3, true, true, true);
+            var payment = new Transaction(amount, 45.0, 3, 850.0, 11, 3, true, true, true);
             assertThat(FraudModel.fraudScore(network, FraudModel.ENCODER.encodeToTensor(payment)))
                     .as("amount %.0f", amount).isGreaterThan(0.5f);
         }

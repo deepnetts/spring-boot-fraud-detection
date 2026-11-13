@@ -1,4 +1,4 @@
-package com.example.frauddetection.minimal;
+package com.example.frauddetection.minimal.domain;
 
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.NotNull;
@@ -19,7 +19,7 @@ import jakarta.validation.constraints.PositiveOrZero;
  * @param newDevice             a device the customer has not used before
  * @param foreign               the merchant is in another country than the card's issuer
  */
-public record TransactionRequest(
+public record Transaction(
         @NotNull @PositiveOrZero Double amount,
         @NotNull @Positive Double customerAvgAmount,
         @NotNull @PositiveOrZero @Max(23) Integer hourOfDay,

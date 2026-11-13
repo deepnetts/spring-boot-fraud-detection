@@ -1,4 +1,4 @@
-package com.example.frauddetection.minimal;
+package com.example.frauddetection.minimal.web;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
