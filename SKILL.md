@@ -17,7 +17,7 @@ changing before you start.
 | Training and test data    | `data/train.csv`, `data/test.csv`                         | `data/SyntheticTransactionGenerator`, `data/CsvTransactionReader` |
 | Preprocessing             | `TransactionEncoder` (a `TensorEncoder`), Deep Netts `Standardizer` | `features/FeatureExtractor` (a `TensorEncoder`), `features/FeatureScaler` |
 | Training and evaluation   | `FraudModel.train`, `FraudModel.evaluate`                 | `model/FraudModelTrainer`, `model/ModelEvaluator`           |
-| Saving and loading        | `FraudModel.save`, `FraudModel.load` (Deep Netts `FileIO`) | `model/ModelRepository`, `model/NetworkParameters`          |
+| Saving and loading        | `FraudModel.save`, `FraudModel.load` (Deep Netts `FileIO`) | `model/ModelRepository` (the Deep Netts network and its metadata) |
 | Prediction and REST API   | `FraudModel.predict`, `FraudController`                   | `service/FraudDetectionService`, `service/ActiveModel`, `web/FraudDetectionController` |
 | Monitoring and retraining | not included                                              | `service/PerformanceMonitor`, `FraudDetectionService.retrainIfBetter` |
 | Configuration             | `application.properties`                                  | `application.yml`, `config/FraudProperties`                 |
@@ -28,8 +28,8 @@ changing before you start.
 1. **Inputs must line up.** Every input must be in the same position for training and prediction.
    - Training, evaluation and prediction turn a record into a tensor with the same `TensorEncoder`. Do not build
      input tensors by hand.
-   - Minimal: the CSV columns, `TransactionEncoder.FEATURE_NAMES`, `TransactionEncoder.encodeToTensor` and
-     `TransactionRequest` must agree.
+   - Minimal: the CSV columns, `TransactionRequest`, `FraudModel.loadData` (which builds a request from each CSV row),
+     `TransactionEncoder.FEATURE_NAMES` and `TransactionEncoder.encodeToTensor` must agree.
    - Extended: `FeatureExtractor.FEATURE_NAMES` and `FeatureExtractor.encodeToTensor` must agree. A saved model
      records its feature names and is rejected at startup if they changed.
 2. **Keep the test data independent.** Never train on the test data, and never choose settings or a threshold by
@@ -49,8 +49,11 @@ changing before you start.
    - Set `TabularDataSet.setColumnNames(...)` before training.
    - Minimal: the network stores its `Standardizer` (`setNormalizer`) and scales its input tensor itself, in place.
      Pass unscaled inputs, and give `predict` a copy so the caller's tensor stays unchanged (`FraudModel.fraudScore`).
-   - Extended: keep the sigmoid output with `ModelRepository` and `NetworkParameters`. Do not switch it to `FileIO`:
-     that changes the model file format, so saved models would no longer load.
+   - Extended: `ModelRepository` saves the Deep Netts network and its metadata in one file. Keep them together, so a
+     model can never be loaded with the wrong scaler or feature names.
+   - Both: call `DeepNetts.getInstance().setMaxThreads(1)` for networks this small; it trains several times faster.
+   - `TabularDataSet.shuffle()` uses one random generator for the whole JVM, so a second training in the same JVM can
+     differ from the first. Seed it (`RandomGenerator.getDefault().initSeed(...)`) where runs must be repeatable.
 7. **Report results honestly.** Results on synthetic data are simulation results, not real-world performance.
    `fraudScore` is not a calibrated probability. Every number in a README must be measured. Do not commit trained
    models (`*.dnet`, `fraud-model.bin`) or build output.
@@ -61,7 +64,7 @@ changing before you start.
 
 1. List the customer's fields and decide, for each one, whether it is known at the moment of payment. Fields known
    only later, such as a chargeback, must not become inputs.
-2. Minimal: update both CSV files, `TransactionRequest` and `TransactionEncoder`.
+2. Minimal: update both CSV files, `TransactionRequest`, `FraudModel.loadData` and `TransactionEncoder`.
 3. Extended: update `Transaction`, `FeatureExtractor`, `CsvTransactionReader`, `SyntheticTransactionGenerator` and
    `docs/DATA_CONTRACT.md`. Section 9 of the data contract lists every step.
 4. Update `requests.http`, the README request tables and the tests. Delete the saved model.
@@ -82,8 +85,9 @@ changing before you start.
 
 ### Integrate into an existing Spring Boot application
 
-1. Copy the model class (minimal `FraudModel`, or extended `model/` and `features/`) and the request and response
-   records. Keep the Deep Netts dependency version.
+1. Copy the model code and the request and response records. Minimal: `FraudModel`, `TensorEncoder` and
+   `TransactionEncoder`. Extended: `model/`, `features/` and `domain/`, plus the parts of `data/` and
+   `config/FraudProperties` that training uses. Keep the Deep Netts dependency version.
 2. Train offline or on startup, and load the saved model where the application needs it.
 3. Call the model from the existing service layer, not only from a new controller.
 4. Make sure only one prediction runs on a network at a time, as both examples do.

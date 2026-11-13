@@ -60,19 +60,19 @@ what a missed fraud and a review cost. These are simulation results from the ext
 |--------------------|-------------------------------------------------|--------------------------------------------------------------------------|
 | Training data      | Two CSV files: 7,500 + 2,500 transactions       | Synthetic generator (12,000 transactions) or your own CSV file           |
 | Model inputs       | 9 fields                                        | 27 features derived from 16 fields                                      |
-| Preprocessing      | Deep Netts `Standardizer`                       | Log transforms, cyclic hour, one-hot categories, z-score scaling        |
+| Preprocessing      | Log scale for amounts, Deep Netts `Standardizer` | Log transforms, cyclic hour, one-hot categories, z-score scaling       |
 | Network            | 9 → 16 → 2 (softmax)                            | 27 → 32 → 16 → 1 (sigmoid)                                               |
 | Evaluation         | Confusion matrix, precision, recall, accuracy   | Also ROC AUC, PR AUC, F1 and a recommended threshold from validation data |
-| Saving and loading | Deep Netts `FileIO`                             | Own file format with atomic replacement and compatibility checks        |
+| Saving and loading | Deep Netts `FileIO`                             | The Deep Netts network and its metadata in one file, replaced atomically |
 | REST endpoints     | 1                                               | 8, plus Spring Boot Actuator                                             |
 | Data analysis      | The CSV files                                   | Summary endpoint that compares fraud with legitimate transactions       |
 | Monitoring         | —                                               | Health, readiness, a scoring counter and PoC performance monitoring     |
 | Retraining         | Delete the model and restart                    | On request, or scheduled with a quality check                           |
-| Tests              | 9                                               | 142                                                                      |
-| First start        | About 9 s, of which training about 4 s          | About 65 s, of which training about 60 s                                 |
+| Tests              | 16                                              | 142                                                                      |
+| First start        | About 9 s, of which training about 2 s          | About 15 s, of which training about 6 s                                  |
 
-First-start times were measured once on the reference machine (Windows 11, JDK 25.0.4), after Maven had compiled the
-project. Later starts load the saved model in about 4 seconds.
+First-start times were measured on the reference machine (Windows 11, JDK 25.0.4) with `mvn spring-boot:run`, after
+Maven had compiled the project. Later starts load the saved model in 4 to 9 seconds.
 
 ## Prerequisites
 
@@ -99,7 +99,8 @@ with `curl`, Postman or another HTTP client.
 
 ## How the Workflow Works
 
-Both examples follow the same steps. The minimal example puts them in one class, `FraudModel`, with one method per step.
+Both examples follow the same steps. The minimal example puts them in one class, `FraudModel`, with one method per step,
+and turns each transaction into the network's inputs with `TransactionEncoder`.
 
 1. **Data:** labelled transactions, each marked as fraud or legitimate.
 2. **Preprocessing:** turn every transaction into numbers on a similar scale.
@@ -110,6 +111,24 @@ Both examples follow the same steps. The minimal example puts them in one class,
 
 The extended example adds data analysis, a recommended threshold, performance monitoring from confirmed outcomes, and
 scheduled retraining that only replaces the model when the new one is at least as good.
+
+## What Deep Netts Does
+
+Deep Netts is a pure Java deep learning library, so the model trains and runs inside the Spring Boot application, with
+no Python service or native runtime next to it.
+
+| Task                  | Deep Netts API                                                    | Minimal | Extended |
+|-----------------------|-------------------------------------------------------------------|:-------:|:--------:|
+| Read a CSV file       | `DataSets.readCsv`                                                |   yes   |          |
+| Hold training data    | `TabularDataSet`, `DataSetItem`, `Tensor1D`                       |   yes   |   yes    |
+| Scale the inputs      | `Standardizer`, stored in the network with `setNormalizer`        |   yes   |          |
+| Build the network     | `FeedForwardNetwork.builder()`: dense ReLU layers, softmax or sigmoid output |   yes   |   yes    |
+| Train                 | `BackpropagationTrainer`: cross-entropy, Adam, L2 regularization, early stop |   yes   |   yes    |
+| Predict               | `FeedForwardNetwork.predict(Tensor1D)`                            |   yes   |   yes    |
+| Save and load         | `FileIO`, or the serializable network in your own file            |   yes   |   yes    |
+
+The examples add what a fraud service needs around the network: input validation, the REST API, threshold-free metrics
+such as PR AUC, monitoring and retraining.
 
 ## Repository Layout
 
