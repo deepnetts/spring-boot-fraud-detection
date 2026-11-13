@@ -3,6 +3,7 @@ package com.example.frauddetection.minimal;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
+import java.lang.reflect.RecordComponent;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
@@ -20,15 +21,28 @@ class TransactionEncoderTest {
 
         assertThat(encoder.encodeToTensor(transaction).getValues())
                 .hasSize(TransactionEncoder.FEATURE_NAMES.size())
-                .containsExactly(950f, 45f, 3f, 850f, 11f, 3f, 1f, 0f, 1f);
+                .containsExactly(log(950), log(45), 3f, log(850), 11f, 3f, 1f, 0f, 1f);
     }
 
     @Test
-    void featureNamesMatchTheCsvColumns() throws IOException {
+    void keepsVeryLargeAmountsInARangeTheNetworkHasSeen() {
+        var huge = new TransactionRequest(1e12, 45.0, 3, 850.0, 11, 3, true, false, true);
+
+        assertThat(encoder.encodeToTensor(huge).getValues()[0]).isLessThan(30f);
+    }
+
+    @Test
+    void csvColumnsAreTheRequestFieldsInOrder() throws IOException {
+        List<String> fields = Stream.of(TransactionRequest.class.getRecordComponents())
+                .map(RecordComponent::getName).toList();
         for (String file : List.of("data/train.csv", "data/test.csv")) {
             String header = Files.readAllLines(Path.of(file)).get(0);
             assertThat(List.of(header.split(","))).containsExactlyElementsOf(
-                    Stream.concat(TransactionEncoder.FEATURE_NAMES.stream(), Stream.of("fraud")).toList());
+                    Stream.concat(fields.stream(), Stream.of("fraud")).toList());
         }
+    }
+
+    private static float log(double value) {
+        return (float) Math.log1p(value);
     }
 }

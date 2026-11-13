@@ -12,14 +12,21 @@ Content-Type: application/json
 {"amount": 42.10, "customerAvgAmount": 55, "hourOfDay": 13, "distanceFromHomeKm": 3.2,
  "transactionsLast24h": 2, "failedAttemptsLast24h": 0, "online": false, "newDevice": false, "foreign": false}
 
-### 3. Invalid values (negative amount, hour 25) -> 400 Bad Request
+### 3. The suspicious payment for 1,000,000 EUR, far above any amount in the training data -> expected fraud: true
+POST http://localhost:8080/api/fraud/predict
+Content-Type: application/json
+
+{"amount": 1000000, "customerAvgAmount": 45, "hourOfDay": 3, "distanceFromHomeKm": 850,
+ "transactionsLast24h": 11, "failedAttemptsLast24h": 3, "online": true, "newDevice": true, "foreign": true}
+
+### 4. Invalid values (negative amount, hour 25) -> 400 Bad Request that names both fields
 POST http://localhost:8080/api/fraud/predict
 Content-Type: application/json
 
 {"amount": -5, "customerAvgAmount": 55, "hourOfDay": 25, "distanceFromHomeKm": 3.2,
  "transactionsLast24h": 2, "failedAttemptsLast24h": 0, "online": false, "newDevice": false, "foreign": false}
 
-### 4. Missing fields -> 400 Bad Request. Missing values are never replaced with defaults
+### 5. Missing fields -> 400 Bad Request that names them. Missing values are never replaced with defaults
 POST http://localhost:8080/api/fraud/predict
 Content-Type: application/json
 

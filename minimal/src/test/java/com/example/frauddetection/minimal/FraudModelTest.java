@@ -39,8 +39,8 @@ class FraudModelTest {
         assertThat(data).hasSize(7500);
         assertThat(data.stream().filter(FraudModel.LabeledTransaction::fraud)).hasSize(225);
         // first row of train.csv: 63.89,36.74,15,0.03,1,1,0,0,0,0
-        assertThat(FraudModel.ENCODER.encodeToTensor(data.get(0).transaction()).getValues())
-                .containsExactly(63.89f, 36.74f, 15f, 0.03f, 1f, 1f, 0f, 0f, 0f);
+        assertThat(data.get(0).transaction()).isEqualTo(
+                new TransactionRequest((double) 63.89f, (double) 36.74f, 15, (double) 0.03f, 1, 1, false, false, false));
         assertThat(data.get(0).fraud()).isFalse();
     }
 
@@ -49,7 +49,7 @@ class FraudModelTest {
         TabularDataSet<MLDataItem> data = FraudModel.toDataSet(FraudModel.loadData(TRAINING_DATA));
 
         assertThat(data.size()).isEqualTo(7500);
-        assertThat(data.get(0).getInput().getValues()).containsExactly(63.89f, 36.74f, 15f, 0.03f, 1f, 1f, 0f, 0f, 0f);
+        assertThat(data.get(0).getInput().getValues()).hasSize(FraudModel.INPUTS);
         assertThat(data.get(0).getTargetOutput().getValues()).containsExactly(1f, 0f);
     }
 
@@ -116,5 +116,14 @@ class FraudModelTest {
 
         assertThat(suspicious).isGreaterThan(0.5f);
         assertThat(ordinary).isLessThan(0.5f);
+    }
+
+    @Test
+    void aVeryLargeSuspiciousPaymentStaysSuspicious() {
+        for (double amount : new double[] {10_000, 100_000, 1_000_000, 1e9}) {
+            var payment = new TransactionRequest(amount, 45.0, 3, 850.0, 11, 3, true, true, true);
+            assertThat(FraudModel.fraudScore(network, FraudModel.ENCODER.encodeToTensor(payment)))
+                    .as("amount %.0f", amount).isGreaterThan(0.5f);
+        }
     }
 }

@@ -42,7 +42,7 @@ The application is a REST API. It has no graphical interface.
    Response:
 
    ```json
-   {"fraudScore": 1.0, "fraud": true}
+   {"fraudScore": 0.9999899864196777, "fraud": true}
    ```
 
 More requests are in [`requests.http`](requests.http). You can run them from IntelliJ IDEA or VS Code, or use them as a
@@ -80,23 +80,34 @@ Returns a fraud score for one transaction.
 `fraudScore` ranks transactions and is compared with the threshold. It is not a calibrated probability: a score of
 0.8 does not mean an 80 % chance of fraud.
 
-**Errors**
+**Errors** use the standard problem details format (RFC 9457).
 
-| Status            | Cause                                        |
-|-------------------|----------------------------------------------|
-| `400 Bad Request` | A field is missing or outside its constraints |
+| Status            | Cause                                                                                    |
+|-------------------|------------------------------------------------------------------------------------------|
+| `400 Bad Request` | A field is missing or outside its constraints. `detail` names every invalid field         |
+| `400 Bad Request` | The body is not valid JSON, or a value has the wrong type, such as `13.7` for `hourOfDay` |
+
+For example, `"amount": -5` and `"hourOfDay": 25` give:
+
+```json
+{"title": "Bad Request", "status": 400, "instance": "/api/fraud/predict",
+ "detail": "Invalid fields: amount must be greater than or equal to 0; hourOfDay must be less than or equal to 23"}
+```
 
 **Example scenarios**, with the model trained on the included data:
 
 | Transaction                                                                        | `fraud` |
 |------------------------------------------------------------------------------------|---------|
 | €950 online, 850 km from home at 3 AM, new device, 11 payments and 3 failed attempts today | `true`  |
+| The same payment for €100,000 or more                                              | `true`  |
 | €42.10 in a store near home at 1 PM, known device, 2 payments today                | `false` |
 
 ## How It Works
 
-All machine learning code is in [`FraudModel`](src/main/java/com/example/frauddetection/minimal/FraudModel.java), with
-one method per step:
+The machine learning workflow is in [`FraudModel`](src/main/java/com/example/frauddetection/minimal/FraudModel.java),
+with one method per step. [`TransactionEncoder`](src/main/java/com/example/frauddetection/minimal/TransactionEncoder.java)
+turns a transaction into the network's inputs for every step.
+
 
 | Step                | Method          | Description                                                                                      |
 |---------------------|-----------------|--------------------------------------------------------------------------------------------------|
@@ -109,12 +120,17 @@ one method per step:
 On startup, `FraudModel` loads the saved network if the file exists. Otherwise it trains and saves a new one. In both
 cases it then logs an evaluation.
 
-**One encoder for every step.** [`TransactionEncoder`](src/main/java/com/example/frauddetection/minimal/TransactionEncoder.java)
-turns a `TransactionRequest` into a Deep Netts `Tensor1D` with the nine inputs in CSV column order. It implements the
-small generic `TensorEncoder` interface. Training, evaluation and prediction all use the same `FraudModel.ENCODER`, so
-the inputs always line up. For training, each label also becomes two outputs, legitimate and fraud.
+**One encoder for every step.** `TransactionEncoder` turns a `TransactionRequest` into a Deep Netts `Tensor1D` with
+the nine inputs in the order of `TransactionEncoder.FEATURE_NAMES`. It implements the small generic `TensorEncoder`
+interface. Training, evaluation and prediction all use the same `FraudModel.ENCODER`, so the inputs always line up. For
+training, each label also becomes two outputs, legitimate and fraud.
 
-**Why scaling matters.** The inputs have very different ranges: an amount can be in the thousands, while `online` is 0
+**Why a log scale for amounts and distance.** Amounts range from cents to thousands of euros. A network extrapolates
+badly from values far outside its training data, where the largest amount is €9,817: with raw amounts, the suspicious
+example above scored as legitimate at €100,000. The encoder therefore uses `log(1 + x)` for both amounts and the
+distance, which keeps even a payment of €1,000,000,000 close to values the network has seen.
+
+**Why scaling matters.** The inputs still have very different ranges: a log amount is around 4, while `online` is 0
 or 1. The `Standardizer` gives every input a mean of 0 and a standard deviation of 1, measured on the training data
 only. It is stored in the network, so the saved file contains it and every prediction is scaled the same way as the
 training data.
@@ -168,27 +184,28 @@ workflow and are not estimates of real-world performance.
 
 |                      | Flagged | Not flagged |
 |----------------------|--------:|------------:|
-| **Fraud**            |      36 |          39 |
-| **Legitimate**       |       3 |       2,422 |
+| **Fraud**            |      31 |          44 |
+| **Legitimate**       |       4 |       2,421 |
 
 | Metric    | Value  | Meaning                                                    |
 |-----------|-------:|------------------------------------------------------------|
-| Precision | 0.92   | Of the flagged transactions, the share that really is fraud |
-| Recall    | 0.48   | Of the fraud cases, the share that is flagged               |
-| Accuracy  | 0.9832 | Share of all answers that are right                         |
+| Precision | 0.89   | Of the flagged transactions, the share that really is fraud |
+| Recall    | 0.41   | Of the fraud cases, the share that is flagged               |
+| Accuracy  | 0.9808 | Share of all answers that are right                         |
 
 Accuracy looks excellent, but a "model" that never flags anything would already score 0.9700, because 97 % of the
 transactions are legitimate. That is why fraud detection is judged by precision and recall instead.
 
-These numbers show a trade-off. The model's alerts are reliable (36 of 39 are fraud), but it catches about half of the
-fraud. Lowering `fraud.threshold` catches more fraud at the cost of more false alarms. The right threshold depends on
+These numbers show a trade-off. The model's alerts are reliable (31 of 35 are fraud), but it catches about 4 in 10
+fraud cases. Lowering `fraud.threshold` catches more fraud at the cost of more false alarms. The right threshold depends on
 what a missed fraud and a false alarm cost the business. The [extended example](../extended/README.md) adds more
 signals, more metrics and a recommended threshold.
 
-The training settings (16 hidden neurons, 30 epochs) were picked by comparing a few options on part of `train.csv`, not
-on the test data. Training uses a fixed random seed and one thread, so each run gives the same results. On the
-reference machine (Windows 11, JDK 25.0.4), training took about 4 seconds, and a start that loads the saved model
-took about 3.5 seconds.
+The training settings (16 hidden neurons, 30 epochs, learning rate 0.001) and the log scale were chosen on part of
+`train.csv`, never on the test data. On that validation part, raw and log-scale inputs scored about the same (PR AUC
+0.70 and 0.67, with 59 fraud cases), so the log scale was kept for its safe behaviour on large amounts. Training uses
+a fixed random seed and one thread, so each run gives the same results. On the reference machine (Windows 11,
+JDK 25.0.4), training took 3 to 7 seconds, and a start that loads the saved model took about 4 seconds.
 
 ## Customization
 
@@ -198,9 +215,10 @@ Delete the `model` directory after any change to the data, inputs or training, s
   format: numeric columns, 1/0 for yes/no, and `fraud` as the last column. Split by time if you can, with the most
   recent transactions in `test.csv`. Keep the test data out of training and tuning.
 - **Change the inputs:**
-  1. Add or remove the column in both CSV files.
-  2. Update `TransactionRequest` and `TransactionEncoder` (`FEATURE_NAMES` and `encodeToTensor`), in the same order
-     as the CSV columns. The network's input size and column names follow from `FEATURE_NAMES`.
+  1. Add or remove the column in both CSV files. The CSV columns are the `TransactionRequest` fields, in order.
+  2. Update `TransactionRequest`, `FraudModel.loadData` (it builds a `TransactionRequest` from each CSV row) and
+     `TransactionEncoder` (`FEATURE_NAMES` and `encodeToTensor`). The network's input size and column names follow
+     from `FEATURE_NAMES`.
 - **Change the threshold:** set `fraud.threshold` in `application.properties`.
 - **Tune training:** the hidden layer size, learning rate and number of epochs are set in `FraudModel.train`. Compare
   settings on part of the training data, not on `test.csv`.
@@ -212,14 +230,16 @@ mvn test
 ```
 
 The tests check that:
-- the CSV files are read with the expected rows, values and labels;
-- the encoder puts the fields in the order of the CSV columns;
+- the CSV files are read with the expected rows, values and labels, and their columns are the request fields;
+- the encoder puts the fields in order and keeps very large amounts in range;
 - the model catches fraud with better than "flag nothing" accuracy on the test data;
+- a suspicious payment stays suspicious from €10,000 up to €1,000,000,000;
 - the network scales raw inputs with its stored scaler, and scoring leaves the caller's inputs unscaled;
 - a saved and reloaded model gives identical scores;
-- the REST endpoint flags the suspicious example, accepts the ordinary one and rejects invalid input.
+- the REST endpoint flags the suspicious example, accepts the ordinary one and rejects invalid input, naming the
+  invalid fields.
 
-The tests take about 30 seconds.
+The 16 tests take under a minute.
 
 ## Deep Netts Notes
 
@@ -234,12 +254,17 @@ Checked on Deep Netts 4.0.5. Models saved with 4.0.4 load and give identical sco
 - `TabularDataSet.setColumnNames(...)` is required before training.
 - Training uses one thread (`DeepNetts.getInstance().setMaxThreads(1)`, a JVM-wide setting), which is faster for a
   network this small.
+- Deep Netts prints its training progress (`Epoch:1, ... TrainError ... TrainAccuracy ...`) to standard output, not
+  through a logger. `TrainError` is the training loss. `TrainAccuracy` is computed by Deep Netts during training and
+  does not match the accuracy in the evaluation table; judge the model by the evaluation on the test data.
 
 ## Limitations
 
 - **Synthetic data.** The data comes from a generator with simplified fraud patterns. Results on real data will differ.
 - **Few signals.** Nine inputs are enough to show the workflow, not to catch subtle fraud. The extended example uses 27
   features.
+- **Values far outside the training data.** The log scale keeps very large amounts in a sensible range, but a network
+  is only reliable for transactions similar to those it was trained on.
 - **No monitoring or retraining.** See the extended example.
 - **No security.** Run it locally only.
 

@@ -13,6 +13,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import java.nio.file.Path;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.hamcrest.Matchers.containsString;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -56,13 +57,23 @@ class FraudControllerTest {
         predict("""
                 {"amount": -5, "customerAvgAmount": 55, "hourOfDay": 13, "distanceFromHomeKm": 3.2,
                  "transactionsLast24h": 2, "failedAttemptsLast24h": 0, "online": false, "newDevice": false, "foreign": false}""")
-                .andExpect(status().isBadRequest());
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.detail").value("Invalid fields: amount must be greater than or equal to 0"));
     }
 
     @Test
     void rejectsAMissingField() throws Exception {
         predict("""
                 {"amount": 42.10, "customerAvgAmount": 55}""")
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.detail").value(containsString("hourOfDay must not be null")));
+    }
+
+    @Test
+    void rejectsADecimalHour() throws Exception {
+        predict("""
+                {"amount": 42.10, "customerAvgAmount": 55, "hourOfDay": 13.7, "distanceFromHomeKm": 3.2,
+                 "transactionsLast24h": 2, "failedAttemptsLast24h": 0, "online": false, "newDevice": false, "foreign": false}""")
                 .andExpect(status().isBadRequest());
     }
 
