@@ -22,7 +22,6 @@ import java.util.Optional;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.FutureTask;
-import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -362,7 +361,7 @@ class FraudDetectionServiceTest {
             assertEquals(served.metadata().trainedAt(), result.get().modelTrainedAt());
         }
         stop.get();
-        assertThrows(RejectedExecutionException.class, () -> served.predict(TRANSACTION));
+        assertThrows(IllegalStateException.class, () -> served.predict(TRANSACTION));
         assertEquals(HttpStatus.SERVICE_UNAVAILABLE, assertThrows(ResponseStatusException.class, service::modelInfo).getStatusCode());
     }
 
@@ -430,7 +429,7 @@ class FraudDetectionServiceTest {
         retrain.get();
 
         assertEquals(HttpStatus.SERVICE_UNAVAILABLE, assertThrows(ResponseStatusException.class, service::modelInfo).getStatusCode());
-        assertThrows(RejectedExecutionException.class, () -> built.get().predict(TRANSACTION));
+        assertThrows(IllegalStateException.class, () -> built.get().predict(TRANSACTION));
     }
 
     @Test

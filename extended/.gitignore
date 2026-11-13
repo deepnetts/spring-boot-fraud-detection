@@ -8,7 +8,6 @@
 /model/
 *.dnet
 fraud-model.bin
-fraud-model.meta
 
 # IDEs
 .idea/

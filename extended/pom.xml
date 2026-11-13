@@ -54,6 +54,10 @@
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
+                <configuration>
+                    <!-- The default optimized launch limits the JIT compiler, which makes training about 3 times slower -->
+                    <optimizedLaunch>false</optimizedLaunch>
+                </configuration>
             </plugin>
         </plugins>
     </build>

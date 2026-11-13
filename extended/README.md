@@ -10,13 +10,13 @@ A Java proof of concept that scores card transactions for fraud through a REST A
 
 Card fraud is a rare-event problem. Fraud is a small share of all transactions, so a model that always answers "legitimate" can look accurate while catching nothing. This project shows the full path for that kind of problem, from imbalanced labelled data to a scoring API, in one Spring Boot module that is small enough to read and adapt.
 
-Deep Netts builds the neural network, trains it and runs every prediction. The application around it handles feature engineering, evaluation, model storage, the REST API and monitoring.
+Deep Netts builds the neural network, trains it, runs every prediction and is saved as part of the model file. The application around it handles feature engineering, evaluation, the REST API and monitoring. [How Deep Netts is used](#how-deep-netts-is-used) lists the APIs.
 
 With this project you can:
 
 - Train a model on generated transactions or on your own CSV file
 - Review its evaluation metrics on data it did not train on
-- Score transactions over HTTP and get a fraud score, a risk level and rule-based risk indicators
+- Score transactions over HTTP and get a fraud score, a fraud decision and rule-based risk indicators
 - Follow a complete workflow, including validation errors, monitoring and protected retraining
 - Compare the model's decisions with confirmed outcomes, and retrain it on a schedule
 
@@ -57,12 +57,12 @@ flowchart TD
 
 Risk indicators do not come from the network. `RiskIndicators` applies fixed rules to the original transaction.
 
-Training, evaluation and prediction use the same encoder. `FeatureExtractor` implements the small generic `TensorEncoder` interface, and `FraudModel.encoder(scaler)` adds the scaler fitted on the training split. `FraudModelTrainer` loads the data, splits it, fits the scaler on the training split, trains the network and evaluates it. `ModelRepository` then saves the result as one file. That file holds the network's weights and biases, the scaler and the metrics.
+Training, evaluation and prediction use the same encoder. `FeatureExtractor` implements the small generic `TensorEncoder` interface, and `FraudModel.encoder(scaler)` adds the scaler fitted on the training split. `FraudModelTrainer` loads the data, splits it, fits the scaler on the training split, trains the network and evaluates it. `ModelRepository` then saves the result as one file. That file holds the Deep Netts network itself, the scaler, the feature names and the metrics.
 
 | Package | Responsibility |
 |---|---|
 | `web` | REST controller, request types and error responses |
-| `service` | Scoring, the training lifecycle, risk indicators and model health |
+| `service` | Scoring, the training lifecycle, safe model replacement (`ActiveModel`), monitoring, risk indicators and model health |
 | `model` | Training, evaluation, saving and loading models |
 | `features` | Feature extraction and scaling |
 | `data` | Synthetic generator, CSV reader and dataset summary |
@@ -73,7 +73,7 @@ Training, evaluation and prediction use the same encoder. `FeatureExtractor` imp
 
 | Area | What the project provides |
 |---|---|
-| Scoring API | Single and batch scoring (up to 1,000 transactions) with a fraud score, risk level and risk indicators |
+| Scoring API | Single and batch scoring (up to 1,000 transactions) with a fraud score, a fraud decision and risk indicators |
 | Training data | Synthetic data by default, or a CSV file of your own |
 | Data analysis | Fraud rate by category, and fraud compared with legitimate transactions field by field |
 | Evaluation | Metrics on a test split the model did not train on, plus a recommended threshold |
@@ -90,7 +90,7 @@ The application is a REST API with no graphical frontend and no Swagger page. Th
 
 - Java 25
 - Maven 3.9 or newer
-- `curl` and a bash-compatible shell for the examples, such as Git Bash on Windows
+- `curl` and a bash-compatible shell for the examples, such as Git Bash on Windows. Windows PowerShell commands follow the Quick Start
 
 **1. Start the application** from the `extended` folder. Leave it running and use a second terminal for the next steps. To stop it later, press Ctrl+C in this terminal.
 
@@ -99,9 +99,9 @@ cd extended
 mvn spring-boot:run
 ```
 
-The first start trains a model on synthetic transactions, which takes 1 to 2 minutes, and saves it to `./model`. Later starts load the saved model.
+The first start trains a model on synthetic transactions, which takes about 15 seconds, and saves it to `./model`. Later starts load the saved model.
 
-To run a packaged build instead, use `mvn package && java -jar target/fraud-detection-0.1.0-SNAPSHOT.jar`.
+To run a packaged build instead, run `mvn package`, which also runs the tests, and then `java -jar target/fraud-detection-0.1.0-SNAPSHOT.jar`.
 
 **2. Wait until it is ready.** This returns `OUT_OF_SERVICE` while the first model trains, and `UP` once scoring is available.
 
@@ -122,6 +122,14 @@ curl -X POST localhost:8080/api/transactions/assess -H "Content-Type: applicatio
   "cardNotPresent": true, "usedChip": false, "usedPin": false,
   "foreignTransaction": true, "newDevice": true, "newMerchant": true
 }'
+```
+
+**In Windows PowerShell**, where `curl` is not the curl used above, the same steps are:
+
+```powershell
+Invoke-RestMethod http://localhost:8080/actuator/health/readiness
+Invoke-RestMethod -Method Post -Uri http://localhost:8080/api/transactions/assess -ContentType "application/json" `
+  -Body '{"transactionId": "tx-1001", "amount": 2499.99, "customerAvgAmount": 45.0, "hourOfDay": 3, "merchantCategory": "ELECTRONICS", "distanceFromHomeKm": 850, "distanceFromLastTransactionKm": 790, "minutesSinceLastTransaction": 12, "transactionsLast24h": 11, "failedAttemptsLast24h": 3, "accountAgeDays": 400, "cardNotPresent": true, "usedChip": false, "usedPin": false, "foreignTransaction": true, "newDevice": true, "newMerchant": true}'
 ```
 
 With the default demonstration setup (default settings, synthetic data, seed 42), expect a result like `"fraudScore":1.0,"fraud":true` with 9 risk indicators. Scores and metrics in this README come from that setup. They are examples, not guaranteed values, and a different model can give different results.
@@ -155,7 +163,7 @@ The application has no graphical frontend, and nothing needs to be built to try 
 | GET | `/api/monitoring` | Alert rate, outcomes, precision and recall of the active model, and the last scheduled retraining |
 | GET | `/actuator/health` | Application health, including a `model` status |
 | GET | `/actuator/health/readiness` | Ready only when a model is loaded |
-| GET | `/actuator/metrics/fraud.assessments` | Scoring count by risk level |
+| GET | `/actuator/metrics/fraud.assessments` | Scoring count by decision, with the tags `fraud:true` and `fraud:false` |
 
 `POST /api/model/train` accepts an optional body. `samples` and `fraudRate` apply to synthetic data only.
 
@@ -262,7 +270,27 @@ All 16 model inputs are required. A request that leaves one out, or has a value 
 |---|---|
 | Layers | 27 inputs → 32 ReLU → 16 ReLU → 1 sigmoid |
 | Loss and optimizer | Binary cross-entropy, Adam, L2 regularization |
-| Default training | 12,000 samples at a 3% fraud rate, up to 15 epochs |
+| Default training | 12,000 samples at a 3% fraud rate, up to 15 epochs, about 6 seconds on one thread |
+
+### How Deep Netts is used
+
+| Task | Deep Netts API | Where |
+|---|---|---|
+| Training data | `TabularDataSet`, `DataSetItem`, `Tensor1D` | `FraudModelTrainer.toDataSet` |
+| Network | `FeedForwardNetwork.builder()` with ReLU hidden layers and a sigmoid output | `FraudModelTrainer.buildNetwork` |
+| Training | `BackpropagationTrainer`: Adam, learning rate, L2 regularization, early stop on the training error, shuffling | `FraudModelTrainer.trainWithTestSet` |
+| Prediction | `FeedForwardNetwork.predict(Tensor1D)` | `FraudModel.predict` |
+| Saving and loading | The serializable `FeedForwardNetwork`, written in inference mode as Deep Netts `FileIO` writes it, in one file with the metadata | `ModelRepository` |
+| Speed | `DeepNetts.getInstance().setMaxThreads(1)`: one thread trains this small network about 7 times faster than the default | `FraudModelTrainer` |
+
+Two parts are written in this example. Threshold-free metrics, ROC AUC and PR AUC, are in `ModelEvaluator`, because Deep Netts' `ClassifierEvaluator` reports the confusion matrix at a fixed decision only. Scaling is in `FeatureScaler`: it does what the Deep Netts `Standardizer` in the minimal example does, with results that differ only in rounding, and it keeps the reference results below reproducible.
+
+Deep Netts behaviour worth knowing, checked on 4.0.5:
+
+- `TabularDataSet.shuffle()` uses one random generator for the whole JVM. A training run therefore depends on what ran before it in the same JVM, unless the generator is seeded first. The first training after a start always gives the reference results.
+- Training progress (`Epoch:1, ... TrainError ...`) is printed to standard output, not through a logger.
+- `predict(float[])` fails on a network loaded from a file; use `predict(Tensor1D)`. `network.close()` fails when CUDA is not in use, so `FraudModel.close` calls it only with CUDA.
+- `mvn spring-boot:run` normally limits the JIT compiler to start faster. Both `pom.xml` files turn that off with `optimizedLaunch`, because it made training about 3 times slower.
 
 ### Features
 
@@ -575,12 +603,12 @@ Invalid CSV file /data/transactions.csv (2 problems):
 - **Map your merchant codes** to the 10 categories in `MerchantCategory`.
 - **Keep values simple.** Use dots for decimals and UTF-8. Quoted values and commas inside values are not supported, and the whole file is loaded into memory.
 - **Evaluate for your data.** The split is random. Real chronological transactions may need a time-based or customer-aware evaluation, and the threshold should reflect your own costs.
-- **To change the columns,** edit `Transaction`, `FeatureExtractor` and `CsvTransactionReader`, then retrain.
+- **To change the columns,** edit `Transaction`, `FeatureExtractor`, `CsvTransactionReader`, `SyntheticTransactionGenerator`, `RiskIndicators` and `DatasetSummary`, then update `data/sample-transactions.csv`, `requests.http` and the [data contract](docs/DATA_CONTRACT.md), and retrain.
 
 ### Saved models
 
 - **Missing:** the first start trains and saves a model when `fraud.model.train-if-missing` is `true`. Otherwise the application starts and scoring returns `503` until a model is trained.
-- **Incompatible or unreadable:** startup stops with a message explaining what is wrong and what to do. The file is never changed, moved or retrained over.
+- **Incompatible or unreadable:** startup stops with a message explaining what is wrong and what to do. The file is never changed, moved or retrained over. Models saved by earlier versions of this example, which stored only the network's weights, are reported as incompatible: train a new one.
 - **Replacing a model:** only `POST /api/model/train` with `{"overwrite":true}` replaces one, and the previous model is **not kept**. There is no backup. If training or saving fails, the existing model stays in place and keeps serving.
 - **Shutdown during a retrain (PoC limitation):** shutdown does not cancel a retrain. It either finishes and saves a complete model, which is not activated until the next start, or is lost if the JVM halts first. The saved model is never left partly written.
 
@@ -612,7 +640,8 @@ This is a PoC for local use, not a production service.
 - **Metrics describe synthetic data.** They are not evidence of real-world performance, and fraud scores are not calibrated probabilities.
 - **Strict input.** Every model input must be present, so a transaction with an unknown value cannot be scored.
 - **Retraining is synchronous.** The request stays open until training finishes.
-- **Monitoring is a PoC.** Counters, decisions and outcomes are kept in memory and reset on restart or with a new model. There is no drift detection or alerting.
+- **Monitoring is a PoC.** Decisions and outcomes are kept in memory and reset on restart or with a new model. The `fraud.assessments` counter resets on restart only. There is no drift detection or alerting.
+- **Values outside the training data.** The model is reliable only for transactions like those it trained on. For example, an otherwise ordinary grocery purchase of €10,000 or more scores low, because the synthetic data contains no such pattern. Validate ranges for your own data, and retrain when real transactions move outside them.
 - **Retraining needs new labelled data.** Scheduled retraining reads the configured data again. With real data, someone has to add newly labelled transactions to the CSV file, for example from the reported outcomes.
 - **Error details.** Validation errors list every invalid field. A value of the wrong JSON type, such as text for `hourOfDay`, reports only that one field, because parsing stops there.
 - **CSV options.** `samples` and `fraudRate` are ignored without a warning when the source is `csv`, and `timestamp` is not validated because it is never read.

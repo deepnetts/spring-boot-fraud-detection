@@ -22,6 +22,7 @@ import com.example.frauddetection.features.FeatureExtractor;
 import com.example.frauddetection.features.FeatureScaler;
 import com.example.frauddetection.features.TensorEncoder;
 
+import deepnetts.core.DeepNetts;
 import deepnetts.data.DataSetItem;
 import deepnetts.data.MLDataItem;
 import deepnetts.data.TabularDataSet;
@@ -43,6 +44,11 @@ import deepnetts.tensor.Tensor1D;
 public class FraudModelTrainer {
 
     private static final Logger log = LoggerFactory.getLogger(FraudModelTrainer.class);
+
+    static {
+        // the network is small, so one thread trains several times faster than coordinating many (same results)
+        DeepNetts.getInstance().setMaxThreads(1);
+    }
 
     private final double threshold;
     private final FraudProperties.Data dataSource;

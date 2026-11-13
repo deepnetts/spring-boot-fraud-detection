@@ -23,6 +23,7 @@ public final class FraudModel implements AutoCloseable {
     private final FeedForwardNetwork network;
     private final ModelMetadata metadata;
     private final TensorEncoder<Transaction, Tensor1D> encoder;
+    private boolean closed; // guarded by network
 
     public FraudModel(FeedForwardNetwork network, ModelMetadata metadata) {
         requireCurrentFeatures(metadata.featureNames());
@@ -61,6 +62,9 @@ public final class FraudModel implements AutoCloseable {
         Tensor1D input = encoder.encodeToTensor(transaction);
         // the network keeps per-layer activations as state, so inference must not run concurrently
         synchronized (network) {
+            if (closed) {
+                throw new IllegalStateException("This fraud model is closed");
+            }
             // not predict(float...): it relies on a transient field that is null after loading from file
             return network.predict(input).getValues()[0];
         }
@@ -82,6 +86,7 @@ public final class FraudModel implements AutoCloseable {
     @Override
     public void close() throws Exception {
         synchronized (network) {
+            closed = true;
             if (network.getThreadPool() != null) {
                 network.getThreadPool().shutdownNow();
             }

@@ -1,6 +1,10 @@
 spring:
   application:
     name: fraud-detection
+  jackson:
+    deserialization:
+      # Reject a decimal number for a whole-number field, such as 13.7 for hourOfDay, instead of cutting it to 13
+      accept-float-as-int: false
 
 server:
   port: 8080
@@ -49,7 +53,7 @@ fraud:
     seed: 42
   retraining:
     # Scheduled retraining, e.g. "0 0 3 * * *" for 03:00 every day; "-" turns it off.
-    # Retraining only helps when new labelled data has arrived (see "Retraining" in the README)
+    # Retraining only helps when new labelled data has arrived (see "Scheduled retraining" in the README)
     cron: "-"
     # The new model replaces the active one only if its PR AUC on the same test rows is at most this much lower
     quality-tolerance: 0.01

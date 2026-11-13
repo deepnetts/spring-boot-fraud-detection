@@ -23,11 +23,12 @@ import com.example.frauddetection.config.FraudProperties;
 import com.example.frauddetection.model.ModelLoadException.Reason;
 
 import deepnetts.net.FeedForwardNetwork;
+import deepnetts.net.Mode;
 
 /**
- * Persists a model as one file holding its metadata (scaler, metrics, architecture) and the
- * network's trained parameters. On load the network is rebuilt from the architecture and the
- * parameters are copied in (see {@link NetworkParameters} for why Deep Netts' own save/load isn't used).
+ * Persists a model as one file holding the Deep Netts network and its metadata (feature names, scaler, metrics). The
+ * network is written the way Deep Netts {@code FileIO.writeToFile} writes it, in inference mode with Java
+ * serialization, but in the same file as the metadata, so the two can only be replaced together.
  */
 @Component
 public class ModelRepository {
@@ -84,13 +85,7 @@ public class ModelRepository {
         }
         SavedModel saved = read(file);
         checkFeatures(saved, file);
-        try {
-            FeedForwardNetwork network = FraudModelTrainer.buildNetwork(saved.metadata().hiddenLayers(), 0);
-            saved.parameters().restoreInto(network);
-            return Optional.of(new FraudModel(network, saved.metadata()));
-        } catch (RuntimeException e) {
-            throw new ModelLoadException(Reason.INCOMPATIBLE, file, "its parameters don't fit the network: " + e, e);
-        }
+        return Optional.of(new FraudModel(saved.network(), saved.metadata()));
     }
 
     public Path dir() {
@@ -100,7 +95,9 @@ public class ModelRepository {
     private static void write(FraudModel model, Path tmp) throws IOException {
         try (FileChannel channel = FileChannel.open(tmp, StandardOpenOption.WRITE);
                 var out = new ObjectOutputStream(Channels.newOutputStream(channel))) {
-            out.writeObject(new SavedModel(model.metadata(), NetworkParameters.capture(model.network())));
+            // as Deep Netts FileIO.writeToFile does: the network is saved ready for predictions
+            model.network().setMode(Mode.INFERENCE);
+            out.writeObject(new SavedModel(model.metadata(), model.network()));
             out.flush();
             // on disk before the swap, so a power cut can't leave a damaged model in place
             channel.force(true);
@@ -110,9 +107,16 @@ public class ModelRepository {
     private static SavedModel read(Path path) {
         try (var in = new ObjectInputStream(Files.newInputStream(path))) {
             if (in.readObject() instanceof SavedModel saved && saved.metadata() != null) {
+                if (saved.network() == null) {
+                    // written by the earlier version of this example, which saved only the weights
+                    throw new ModelLoadException(Reason.INCOMPATIBLE, path,
+                            "it was saved in an older format without the network; train a new model", null);
+                }
                 return saved;
             }
             throw new StreamCorruptedException("not a fraud model file");
+        } catch (ModelLoadException e) {
+            throw e;
         } catch (ClassNotFoundException | InvalidClassException e) {
             throw new ModelLoadException(Reason.INCOMPATIBLE, path,
                     "it was written by a different version of the code (" + e + ")", e);
@@ -137,6 +141,6 @@ public class ModelRepository {
         }
     }
 
-    private record SavedModel(ModelMetadata metadata, NetworkParameters parameters) implements Serializable {
+    private record SavedModel(ModelMetadata metadata, FeedForwardNetwork network) implements Serializable {
     }
 }

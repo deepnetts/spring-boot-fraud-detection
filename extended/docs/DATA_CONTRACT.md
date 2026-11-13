@@ -1,6 +1,6 @@
 # Data Contract
 
-Contract version 1 (MVP). Last reviewed 2026-10-30.
+Contract version 1 (PoC). Last reviewed 2026-10-30.
 
 This document describes the data the fraud model expects, what the code does today, and what real-data
 integrations must provide. It separates those three things on purpose: a definition here is not a claim
@@ -12,7 +12,7 @@ that the code already computes it.
 |---|---|
 | **Implemented** | The code does this today |
 | **Contract requirement** | A rule for whoever supplies real data. The application cannot check it |
-| **Not in the MVP** | Deliberately left out |
+| **Not in the PoC** | Deliberately left out |
 
 | Capability | Status |
 |---|---|
@@ -24,8 +24,8 @@ that the code already computes it.
 | Validation split, PR AUC and recommended threshold | Implemented ([section 10](#10-evaluation-and-fraud-scores)) |
 | CSV training data | Implemented ([section 7](#7-csv-training-format)) |
 | `timestamp` and `customerId` metadata columns | Implemented: accepted, not read |
-| Time-based or customer-based evaluation | Not in the MVP |
-| Sending an unknown value | Not in the MVP ([section 3](#3-unknown-not-applicable-and-false)) |
+| Time-based or customer-based evaluation | Not in the PoC |
+| Sending an unknown value | Not in the PoC ([section 3](#3-unknown-not-applicable-and-false)) |
 
 The schema is fixed at 27 features. There is no dynamic feature registration. Developers customize the
 model by changing Java code and retraining ([section 9](#9-customizing-features)).
@@ -115,7 +115,7 @@ Real payment data has three different states that this schema cannot fully repre
 | `transactionsLast24h`, `failedAttemptsLast24h` | Never | History is unavailable | Unknown cannot be sent. `0` is a real count |
 | `accountAgeDays`, `hourOfDay` | Never | Reference data is missing | Unknown cannot be sent |
 
-**Rules for the MVP:**
+**Rules for the PoC:**
 
 - The application never fills in a missing value.
 - Do not send `0`, `false` or another placeholder to mean "unknown". `distanceFromHomeKm: 0` means the
@@ -181,7 +181,7 @@ them, including flags, are standardized with `(x - mean) / std` using statistics
 | 25 | `category_gambling` | `merchantCategory` | 1 if `GAMBLING`, else 0 |
 | 26 | `category_money_transfer` | `merchantCategory` | 1 if `MONEY_TRANSFER`, else 0 |
 
-Feature names stay as they are for the MVP. Note that `foreign` comes from `foreignTransaction`.
+Feature names stay as they are for the PoC. Note that `foreign` comes from `foreignTransaction`.
 
 ## 6. Point-in-time rules
 
@@ -267,8 +267,11 @@ To change the features, edit `FeatureExtractor` and retrain:
 2. If you add or remove a `Transaction` field, update `Transaction`, `SyntheticTransactionGenerator`,
    `CsvTransactionReader` and
    any tests that build a `Transaction`.
-3. Update the feature count in `FraudDetectionApplicationTest`, which expects 27.
-4. Retrain.
+3. Update the feature count in `FraudDetectionApplicationTest`, `CsvTrainingApplicationTest` and
+   `WorkflowAcceptanceTest`, which expect 27.
+4. If you change a `Transaction` field, also update `RiskIndicators`, `DatasetSummary`, `data/sample-transactions.csv`,
+   `requests.http` and this contract.
+5. Retrain.
 
 Removing a feature you cannot supply, such as the distance features, is a valid choice.
 
@@ -319,7 +322,7 @@ fraud costs against what false alarms and reviews cost.
 ### Why a 3% fraud rate
 
 3% is a demonstration choice, not a realistic rate: real card fraud is usually well under 1%. It gives enough
-fraud examples to train and evaluate in about a minute, and it is still imbalanced enough that always answering
+fraud examples to train and evaluate in seconds, and it is still imbalanced enough that always answering
 "legitimate" would be 97% accurate.
 
 **Precision and PR AUC only hold at the fraud rate they were measured at.** With the recall and false-positive
